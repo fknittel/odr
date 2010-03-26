@@ -1,6 +1,23 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
+# vim:set ts=8 sw=4 et:
+
+# dhcprequestor.py -- Requests an IP address on behalf of a given MAC address.
+#
 # Copyright (C) 2010 Fabian Knittel <fabian.knittel@avona.com>
-# Released under the GNU GPLv3 or later
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from pydhcplib.dhcp_packet import DhcpPacket
 from pydhcplib.dhcp_network import DhcpClient
@@ -8,16 +25,6 @@ from pydhcplib.type_strlist import strlist
 from pydhcplib.type_ipv4 import ipv4
 from pydhcplib.type_hwmac import hwmac
 import random
-import sys
-import copy
-
-def print_packet(packet):
-    # This avoids destroying the packet by a buggy display method.
-    p = copy.deepcopy(packet)
-    print 'parameter_request_list: %s' % p.GetOption("parameter_request_list")
-    print 'server_identifier: %s' % p.GetOption("server_identifier")
-    print 'xid: %s' % repr(p.GetOption("xid"))
-    #print p.str()
 
 class AddressRequestor(DhcpClient):
     BROADCAST_IP = ipv4([255,255,255,255])
@@ -34,9 +41,8 @@ class AddressRequestor(DhcpClient):
         """
         self.__local_ip = kwargs["local_ip"]
         DhcpClient.__init__(self, str(self.__local_ip), 67, 67)
-        #DhcpClient.__init__(self, "255.255.255.255", 67, 67)
         self.__mac_addr = kwargs["mac_addr"]
-        if "server_ips" in kwargs:
+        if "server_ips" in kwargs and kwargs["server_ips"] is not None:
             self.__server_ips = kwargs["server_ips"]
         else:
             self.__server_ips = [self.BROADCAST_IP]
@@ -55,7 +61,7 @@ class AddressRequestor(DhcpClient):
             print "Waiting for next packet ..."
             self.GetNextDhcpPacket()
         return self.__result
-        
+
     def generate_discover(self):
         packet = DhcpPacket()
         packet.AddLine("op: BOOTREQUEST")
@@ -150,19 +156,11 @@ class AddressRequestor(DhcpClient):
             return
         self.__waiting = False
 
-def random_mac():
-  return "52:54:00:fb:%02x:%02x" % (random.randint(0,255), random.randint(0,255))
-
-while True:
-    #mac = random_mac()
-    mac = "52:54:00:fb:38:8b"
-    print "Requesting for %s ..." % mac
-    client = AddressRequestor(mac_addr=hwmac(mac),
-            local_ip=ipv4("192.168.102.5"), server_ips=[ipv4("192.168.101.2")])
+def request_ip(mac_addr, local_ip, server_ips=None):
+    if server_ips is not None:
+        server_ips = [ipv4(addr) for addr in server_ips]
+    client = AddressRequestor(mac_addr=hwmac(mac_addr),
+            local_ip=ipv4(local_ip),
+            server_ips=server_ips)
     result = client.start_request()
-    if not result:
-        print "FAILED"
-    else:
-        print result
-    break
-
+    return result
