@@ -40,7 +40,11 @@ class AddressRequestor(DhcpClient):
         The new IP address will be requested for 'mac_addr'.
         """
         self.__local_ip = kwargs["local_ip"]
-        DhcpClient.__init__(self, str(self.__local_ip), 67, 67)
+        if "local_port" in kwargs and kwargs["local_port"] is not None:
+            self.__local_port = kwargs["local_port"]
+        else:
+            self.__local_port = 67
+        DhcpClient.__init__(self, str(self.__local_ip), self.__local_port, 67)
         self.__mac_addr = kwargs["mac_addr"]
         if "server_ips" in kwargs and kwargs["server_ips"] is not None:
             self.__server_ips = kwargs["server_ips"]
@@ -156,11 +160,12 @@ class AddressRequestor(DhcpClient):
             return
         self.__waiting = False
 
-def request_ip(mac_addr, local_ip, server_ips=None):
+def request_ip(mac_addr, local_ip, local_port=None, server_ips=None):
     if server_ips is not None:
         server_ips = [ipv4(addr) for addr in server_ips]
     client = AddressRequestor(mac_addr=hwmac(mac_addr),
             local_ip=ipv4(local_ip),
+            local_port=local_port,
             server_ips=server_ips)
     result = client.start_request()
     return result
