@@ -146,7 +146,7 @@ class AddressRequestor(DhcpClient):
         for opt_name in translate_ips:
             val = packet.GetOption(opt_name)
             if len(val) == 4:
-                self.__result[translate_ips[opt_name]] = str(ipv4(val)),
+                self.__result[translate_ips[opt_name]] = str(ipv4(val))
 
         dns = []
         self.__result['dns'] = dns
