@@ -44,6 +44,10 @@ class AddressRequestor(DhcpClient):
             self.__local_port = kwargs["local_port"]
         else:
             self.__local_port = 67
+        if "max_retries" in kwargs and kwargs["max_retries"] is not None:
+            self.__max_retries = kwargs["max_retries"]
+        else:
+            self.__max_retries = 2
         DhcpClient.__init__(self, str(self.__local_ip), self.__local_port, 67)
         self.__mac_addr = kwargs["mac_addr"]
         if "server_ips" in kwargs and kwargs["server_ips"] is not None:
@@ -52,18 +56,26 @@ class AddressRequestor(DhcpClient):
             self.__server_ips = [self.BROADCAST_IP]
         self.__xid = [random.randint(0, 255) for i in range(4)]
         self.__state = self.AR_INIT
+        self.__last_packet = None
         self.BindToAddress()
 
     def start_request(self):
         disc_packet = self.generate_discover()
-        self.send_to_server(disc_packet)
         self.__state = self.AR_DISCOVER
+        self.send_packet(disc_packet)
 
         self.__waiting = True
         self.__result = None
         while self.__waiting:
             print "Waiting for next packet ..."
-            self.GetNextDhcpPacket()
+            if self.GetNextDhcpPacket(timeout = 1) is None:
+                if self.__packet_retries >= self.__max_retries:
+                    print "Timeout for reply to packet in state %d" % \
+                            self.__state
+                    return None
+                elif self.__last_packet is not None:
+                    self.resend_packet()
+
         return self.__result
 
     def generate_discover(self):
@@ -97,9 +109,20 @@ class AddressRequestor(DhcpClient):
         packet.SetOption("request_ip_address", offer_packet.GetOption("yiaddr"))
         return packet
 
-    def send_to_server(self, packet):
+    def send_packet(self, packet):
+        self.__last_packet = packet
+        self.__packet_retries = 0
+        self._send_to_server(packet)
+
+    def resend_packet(self):
+        self.__packet_retries += 1
+        self._send_to_server(self.__last_packet)
+
+    def _send_to_server(self, packet):
         for server_ip in self.__server_ips:
-            print "Sending packet to %s ..." % str(server_ip)
+            print "Sending packet in state %d to %s ... [%d/%d]" % (
+                    self.__state, str(server_ip), self.__packet_retries + 1,
+                    self.__max_retries + 1)
             self.SendDhcpPacketTo(packet, str(server_ip), 67)
 
     def is_our_xid(self, packet):
@@ -118,6 +141,7 @@ class AddressRequestor(DhcpClient):
                         'server_identifier'))]
             except:
                 pass
+
     def HandleDhcpOffer(self, offer_packet):
         if not self.is_our_xid(offer_packet) or \
                 self.__state != self.AR_DISCOVER:
@@ -126,7 +150,7 @@ class AddressRequestor(DhcpClient):
         req_packet = self.generate_request(offer_packet)
         self.retrieve_server_ip(req_packet)
         self.__state = self.AR_REQUEST
-        self.send_to_server(req_packet)
+        self.send_packet(req_packet)
 
     def HandleDhcpAck(self, packet):
         if not self.is_our_xid(packet) or \
