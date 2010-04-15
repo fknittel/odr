@@ -1,0 +1,102 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+# vim:set ft=python ts=8 sw=4 sts=4 et cindent:
+
+# client-connect
+#
+# Copyright (C) 2010 Fabian Knittel <fabian.knittel@avona.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+import os
+import sys
+sys.path.append('/opt/pydhcplib')
+sys.path.append('/opt/dhcprequestor')
+
+class flushedstream(object):
+    def __init__(self, f):
+        self.f = f
+    def write(self, x):
+        self.f.write(x)
+        self.f.flush()
+sys.stdout = flushedstream(sys.stdout)
+sys.stderr = flushedstream(sys.stderr)
+
+import dhcprequestor
+import machasher
+import re
+
+USERNAME_RE = r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?@(?P<domain>[^/@]+)(/(?P<realm>[^/@]+))?$'
+
+# We use a port > 1024 to avoid the need for running as root.  This needs a
+# firewall rule to redirect the port back to 67.
+DHCP_LOCAL_PORT = 1067
+
+class RealmData(object):
+    def __init__(self, realm):
+        self.realm = realm
+
+        self.dhcp_local_port = DHCP_LOCAL_PORT
+        if realm == 'fsmi-sec':
+            self.vid = 386
+            self.requestor_ip = "10.0.97.141"
+            self.dhcp_server_ips = ["10.0.97.133"]
+        elif realm == 'fsmi':
+            self.vid = 808
+            self.requestor_ip = "10.0.98.141"
+            self.dhcp_server_ips = ["10.0.98.133"]
+        elif realm == 'fsmi-prio':
+            self.vid = 1
+            self.requestor_ip = "10.0.99.141"
+            self.dhcp_server_ips = ["10.0.99.133"]
+        else:
+            sys.stderr.write("E: Unknown realm %s.\n" % realm)
+            sys.exit(1)
+def get_realm_data(realm):
+    realm_data = RealmData(realm)
+    return realm_data
+
+def handle_client_connect(client_config_fn, full_username):
+    m = re.match(USERNAME_RE, full_username)
+    if m is None:
+        sys.stderr.write("E: username in unexpected format: %s\n" % full_username)
+        sys.exit(1)
+
+    sys.stderr.write("I: Calculating MAC address based on full username %s\n" % \
+            full_username)
+    mac_addr = machasher.hash_login_to_mac(full_username)
+
+    realm_data = get_realm_data(realm=m.group('realm'))
+
+    sys.stderr.write("I: Requesting IP address for %s via DHCP\n" % mac_addr)
+    dhcp_result = dhcprequestor.request_ip(mac_addr=mac_addr, local_ip=realm_data.requestor_ip,
+            local_port=realm_data.dhcp_local_port, server_ips=realm_data.dhcp_server_ips)
+    if dhcp_result is None:
+        sys.stderr.write("E: DHCP request failed, aborting connect.\n")
+        sys.exit(1)
+
+    sys.stderr.write("D: DHCP result: %s\n" % repr(dhcp_result))
+    conf_fp = open(client_config_fn, 'wb')
+    conf_fp.write('ifconfig-push %s %s\n' % (dhcp_result['ip-address'],
+            dhcp_result['subnet-mask']))
+    conf_fp.write('vlan-pvid %d\n' % realm_data.vid)
+    conf_fp.write('push "ip-win32 dynamic"\n')
+    conf_fp.write('push "route-gateway %s"\n' % (dhcp_result['gateway']))
+    conf_fp.write('push "redirect-gateway def1"\n')
+    for dns_ip in dhcp_result['dns']:
+        conf_fp.write('push "dhcp-option DNS %s"\n' % dns_ip)
+    conf_fp.write('push "dhcp-option DOMAIN %s"\n' % dhcp_result['domain'])
+    conf_fp.close()
+
+handle_client_connect(sys.argv[1], os.environ['username'])
