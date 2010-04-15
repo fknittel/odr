@@ -1,6 +1,6 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-# vim:set ts=8 sw=4 et:
+# vim:set ts=8 sts=4 sw=4 et:
 
 # dhcprequestor.py -- Requests an IP address on behalf of a given MAC address.
 #
@@ -26,65 +26,46 @@ from pydhcplib.type_ipv4 import ipv4
 from pydhcplib.type_hwmac import hwmac
 import random
 
-class AddressRequestor(DhcpClient):
-    BROADCAST_IP = ipv4([255,255,255,255])
-    AR_INIT = 1
-    AR_DISCOVER = 2
-    AR_REQUEST = 3
-    AR_DONE = 4
+class AddressRequest(object):
+    AR_DISCOVER = 1
+    AR_REQUEST = 2
 
     def __init__(self, **kwargs):
-	"""The 'local_ip' is a valid IP address owned by the requestor in the
-        network in which a new IP address is to be allocated.  The network
-        must provide a DHCP server.
-        The new IP address will be requested for 'mac_addr'.
-        """
-        self.__local_ip = kwargs["local_ip"]
-        if "local_port" in kwargs and kwargs["local_port"] is not None:
-            self.__local_port = kwargs["local_port"]
-        else:
-            self.__local_port = 67
-        if "max_retries" in kwargs and kwargs["max_retries"] is not None:
-            self.__max_retries = kwargs["max_retries"]
-        else:
-            self.__max_retries = 2
-        DhcpClient.__init__(self, str(self.__local_ip), self.__local_port, 67)
-        self.__mac_addr = kwargs["mac_addr"]
-        if "server_ips" in kwargs and kwargs["server_ips"] is not None:
-            self.__server_ips = kwargs["server_ips"]
-        else:
-            self.__server_ips = [self.BROADCAST_IP]
-        self.__xid = [random.randint(0, 255) for i in range(4)]
-        self.__state = self.AR_INIT
-        self.__last_packet = None
-        self.BindToAddress()
+        self._requestor = kwargs["requestor"]
+        self._success_handler_clb = kwargs["success_handler_clb"]
+        self._failure_handler_clb = kwargs["failure_handler_clb"]
+        self._local_ip = kwargs["local_ip"]
+        self._local_port = kwargs.get("local_port", 67)
+        self._mac_addr = kwargs["mac_addr"]
+        self._server_ips = kwargs["server_ips"]
+        self._max_retries = kwargs.get("max_retries", 2)
+        self._timeout = kwargs.get("timeout", 5)
 
-    def start_request(self):
-        disc_packet = self.generate_discover()
-        self.__state = self.AR_DISCOVER
-        self.send_packet(disc_packet)
+        self._xid = [random.randint(0, 255) for i in range(4)]
 
-        self.__waiting = True
-        self.__result = None
-        while self.__waiting:
-            print "Waiting for next packet ..."
-            if self.GetNextDhcpPacket(timeout = 1) is None:
-                if self.__packet_retries >= self.__max_retries:
-                    print "Timeout for reply to packet in state %d" % \
-                            self.__state
-                    return None
-                elif self.__last_packet is not None:
-                    self.resend_packet()
+        # Packet resending and timeout.
+        self._timeout_time = None
+        self._last_packet = None
 
-        return self.__result
+        self._state = self.AR_DISCOVER
+        self._send_packet(self._generate_discover())
+        self._requestor.add_request(self)
 
-    def generate_discover(self):
+    @property
+    def xid(self):
+        return self._xid
+
+    @property
+    def timeout_time(self):
+        return self._timeout_time
+
+    def _generate_discover(self):
         packet = DhcpPacket()
         packet.AddLine("op: BOOTREQUEST")
         packet.AddLine("htype: 1")
         packet.AddLine("hlen: 6")
         packet.AddLine("hops: 1")
-        packet.SetOption("xid", self.__xid)
+        packet.SetOption("xid", self._xid)
         packet.AddLine("parameter_request_list: subnet_mask,router,domain_name_server,domain_name")
         packet.AddLine("dhcp_message_type: DHCP_DISCOVER")
 
@@ -92,14 +73,14 @@ class AddressRequestor(DhcpClient):
         #packet.SetOption("flags", [128, 0])
 
         # We're the gateway.
-        packet.SetOption("giaddr", self.__local_ip.list())
+        packet.SetOption("giaddr", self._local_ip.list())
 
         # Request IP address, etc. for the following MAC address.
-        packet.SetOption("chaddr", self.__mac_addr.list() + 10*[0])
+        packet.SetOption("chaddr", self._mac_addr.list() + 10*[0])
 
         return packet
 
-    def generate_request(self, offer_packet):
+    def _generate_request(self, offer_packet):
         packet = DhcpPacket()
         packet.AddLine("op: BOOTREQUEST")
         packet.AddLine("dhcp_message_type: DHCP_REQUEST")
@@ -109,57 +90,47 @@ class AddressRequestor(DhcpClient):
         packet.SetOption("request_ip_address", offer_packet.GetOption("yiaddr"))
         return packet
 
-    def send_packet(self, packet):
-        self.__last_packet = packet
-        self.__packet_retries = 0
-        self._send_to_server(packet)
-
-    def resend_packet(self):
-        self.__packet_retries += 1
-        self._send_to_server(self.__last_packet)
-
-    def _send_to_server(self, packet):
-        for server_ip in self.__server_ips:
-            print "Sending packet in state %d to %s ... [%d/%d]" % (
-                    self.__state, str(server_ip), self.__packet_retries + 1,
-                    self.__max_retries + 1)
-            self.SendDhcpPacketTo(packet, str(server_ip), 67)
-
-    def is_our_xid(self, packet):
-        # return packet.GetOption('xid') == self.__xid:
-        if packet.GetOption('xid') == self.__xid:
-            return True
-        else:
-            print "Ignoring answer with xid %s" % repr(packet.GetOption('xid'))
-            return False
-
-    def retrieve_server_ip(self, packet):
-        if self.BROADCAST_IP in self.__server_ips or len(self.__server_ips) > 1:
+    def _retrieve_server_ip(self, packet):
+        if len(self._server_ips) > 1:
             print "Attempting to find server ip ..."
             try:
-                self.__server_ips = [ipv4(packet.GetOption(
+                self._server_ips = [ipv4(packet.GetOption(
                         'server_identifier'))]
             except:
                 pass
 
-    def HandleDhcpOffer(self, offer_packet):
-        if not self.is_our_xid(offer_packet) or \
-                self.__state != self.AR_DISCOVER:
+    def _send_packet(self, packet):
+        self._last_packet = packet
+        self._packet_retries = 0
+        self._send_to_server(packet)
+
+    def _resend_packet(self):
+        self._packet_retries += 1
+        self._send_to_server(self._last_packet)
+
+    def _send_to_server(self, packet):
+        self._timeout_time = time.time() + self._timeout
+        for server_ip in self._server_ips:
+            print "Sending packet in state %d to %s ... [%d/%d]" % (
+                    self._state, str(server_ip), self._packet_retries + 1,
+                    self._max_retries + 1)
+            self._requestor.SendDhcpPacketTo(packet, str(server_ip), 67)
+
+    def handle_dhcp_offer(self, offer_packet):
+        if self._state != self.AR_DISCOVER:
             return
         print "Received offer:"
-        req_packet = self.generate_request(offer_packet)
-        self.retrieve_server_ip(req_packet)
-        self.__state = self.AR_REQUEST
-        self.send_packet(req_packet)
+        req_packet = self._generate_request(offer_packet)
+        self._retrieve_server_ip(req_packet)
+        self._state = self.AR_REQUEST
+        self._send_packet(req_packet)
 
-    def HandleDhcpAck(self, packet):
-        if not self.is_our_xid(packet) or \
-                self.__state != self.AR_REQUEST:
+    def handle_dhcp_ack(self, packet):
+        if self._state != self.AR_REQUEST:
             return
-        self.__state = self.AR_DONE
-        self.__waiting = False
-        self.__result = {}
-        self.__result['domain'] = ''.join(map(chr,
+        self._requestor.del_request(self)
+        result = {}
+        result['domain'] = ''.join(map(chr,
                 packet.GetOption('domain_name')))
 
         translate_ips = {
@@ -170,26 +141,104 @@ class AddressRequestor(DhcpClient):
         for opt_name in translate_ips:
             val = packet.GetOption(opt_name)
             if len(val) == 4:
-                self.__result[translate_ips[opt_name]] = str(ipv4(val))
+                result[translate_ips[opt_name]] = str(ipv4(val))
 
         dns = []
-        self.__result['dns'] = dns
+        result['dns'] = dns
         dns_list = packet.GetOption('domain_name_server')
         while len(dns_list) >= 4:
             dns.append(str(ipv4(dns_list[:4])))
             dns_list = dns_list[4:]
 
-    def HandleDhcpNack(self, packet):
-        if not self.is_our_xid(packet):
-            return
-        self.__waiting = False
+        self._success_handler_clb(result)
 
-def request_ip(mac_addr, local_ip, local_port=None, server_ips=None):
-    if server_ips is not None:
-        server_ips = [ipv4(addr) for addr in server_ips]
-    client = AddressRequestor(mac_addr=hwmac(mac_addr),
-            local_ip=ipv4(local_ip),
-            local_port=local_port,
-            server_ips=server_ips)
-    result = client.start_request()
-    return result
+    def handle_dhcp_nack(self, packet):
+        self._requestor.del_request(self)
+        self._failure_handler_clb()
+
+    def handle_timeout(self):
+        if self._packet_retries >= self._max_retries:
+            self._requestor.del_request(self)
+            print "Timeout for reply to packet in state %d" % \
+                    self._state
+            self._failure_handler_clb()
+        elif self._last_packet is not None:
+            self._resend_packet()
+
+class AddressRequestor(DhcpClient):
+    def __init__(self, **kwargs):
+        self.local_ip = kwargs["local_ip"]
+        self.local_port = kwargs.get("local_port", 67)
+        DhcpClient.__init__(self, str(self.local_ip), self.local_port, 67)
+        self.__requests = {}
+        self.BindToAddress()
+
+    def handle_socket(self):
+        self.GetNextDhcpPacket(timeout = 0)
+
+    def add_request(self, request):
+        self.__requests[request.xid] = request
+
+    def del_request(self, request):
+        del self.__requests[request.xid]
+
+    def check_timeouts(self):
+        t = time.time()
+        for request in self.__requests.values()[:]:
+            if t > request.timeout_time:
+                request.handle_timeout()
+
+    def _handle_packet(self, clb_name, packet):
+        xid = packet.GetOption('xid')
+        if xid not in self.__requests:
+            print "Ignoring answer with xid %s" % repr(xid)
+            return
+
+        request = self.__requests[xid]
+        clb = getaddr(request, clb_name)
+        clb(offer_packet)
+
+    def HandleDhcpOffer(self, offer_packet):
+        self._handle_packet('handle_dhcp_offer', offer_packet)
+
+    def HandleDhcpAck(self, packet):
+        self._handle_packet('handle_dhcp_ack', offer_packet)
+
+    def HandleDhcpNack(self, packet):
+        self._handle_packet('handle_dhcp_nack', offer_packet)
+
+class DhcpRequestorLoop(object):
+    def __init__(self):
+        self.timeout = 1
+        self._requestors_by_socket = {}
+        self._requestors_by_ip = {}
+        self._run = True
+
+    def run(self):
+        while self._run:
+            sockets = self._requestors_by_socket.keys()
+            ready_input_sockets, _, _ = select.select(sockets, [], [],
+                    self.timeout)
+            for ready_socket in ready_input_sockets:
+                if ready_socket in self._requestors_by_socket:
+                    requestor = self._requestors_by_socket[ready_socket]
+                    requestor.handle_socket()
+
+            for requestor in self._requestors_by_socket.values():
+                requestor.check_timeouts()
+
+    def quit(self):
+        self._run = True
+
+    def add_requestor(self, local_ip, local_port=67):
+        requestor = AddressRequestor(local_ip=local_ip, local_port=local_port)
+        self._requestors_by_socket[requestor.dhcp_socket] = requestor
+        self._requestors_by_ip[local_ip] = requestor
+
+    def add_request(self, mac_addr, local_ip, server_ips=None):
+        if not local_ip in self._requestors_by_ip:
+            raise RuntimeError('request for unsupported local IP %s' % local_ip)
+        requestor = self._requestors_by_ip[local_ip]
+        client = AddressRequest(mac_addr=hwmac(mac_addr),
+                local_ip=ipv4(local_ip), local_port=requestor.local_port,
+                server_ips=server_ips)
