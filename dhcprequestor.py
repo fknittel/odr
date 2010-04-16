@@ -28,6 +28,8 @@ import random
 import socket
 import select
 import weakref
+import machasher
+import re
 
 class AddressRequest(object):
     AR_DISCOVER = 1
@@ -243,14 +245,94 @@ class RequestorManager(object):
                 requestor.handle_socket()
 
 class CommandConnection(object):
+    CC_RET_FAILURE = 1
+    CC_RET_SUCCESS = 2
+
     def __init__(self, conn_mgr, socket):
         self._conn_mgr = conn_mgr
         self._socket = socket
 
+    @property
+    def socket(self):
+        return self._socket
+
+    @staticmethod
+    def _write_ret(ret_fn, val):
+        ret_fp = open(ret_fn, 'wb')
+        ret_fp.write('%d' % val);
+        ret_fp.close()
+
+    @staticmethod
+    def _success_handler(config_fn, ret_fn, res, realm_data):
+        conf_fp = open(config_fn, 'wb')
+        conf_fp.write('ifconfig-push %s %s\n' % (res['ip-address'],
+                res['subnet-mask']))
+        conf_fp.write('vlan-pvid %d\n' % realm_data.vid)
+        conf_fp.write('push "ip-win32 dynamic"\n')
+        conf_fp.write('push "route-gateway %s"\n' % (res['gateway']))
+        conf_fp.write('push "redirect-gateway def1"\n')
+        for dns_ip in res['dns']:
+            conf_fp.write('push "dhcp-option DNS %s"\n' % dns_ip)
+        conf_fp.write('push "dhcp-option DOMAIN %s"\n' % res['domain'])
+        conf_fp.close()
+
+        self._write_ret(ret_fn, self.CC_RET_SUCCESS)
+
+    @staticmethod
+    def _failure_handler(ret_fn):
+        self._write_ret(ret_fn, self.CC_RET_FAILURE)
+
+    def handle_socket(self):
+        # We assume that everything is sent in one single chunk.
+        try:
+            data = self._socket.read()
+            params = {}
+            for p in data.split(' '):
+                k, v = p.split(' ')
+                params[k] = v
+        except IOError, e:
+            print "IOError in cmd handle"
+            return
+
+        try:
+            full_username = params['full_username']
+            ret_fn = params['ret_file_name']
+            config_fn = params['config_file_name']
+        except KeyError, e:
+            print "command is missing a parameter: %s" % e.args
+            return
+
+        USERNAME_RE = r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?@(?P<domain>[^/@]+)(/(?P<realm>[^/@]+))?$'
+
+        m = re.match(USERNAME_RE, full_username)
+        if m is None:
+            print "username in unexpected format: %s" % full_username
+            return
+        realm = m.group('realm')
+
+        mac_addr = machasher.hash_login_to_mac(full_username)
+
+        realm_data = get_realm_data(realm=realm)
+
+        def success_handler(res):
+            self._success_handler(config_fn, ret_fn, res, realm_data)
+
+        def failure_handler():
+            self._failure_handler(ret_fn)
+
+        self._conn_mgr.requestor_mgr.add_request(
+                success_handler_clb=success_handler,
+                failure_handler_clb=failure_handler,
+                mac_addr=mac_addr, local_ip=realm_data.requestor_ip,
+                server_ips=realm_data.dhcp_server_ips)
+
 class CommandConnectionManager(object):
-    def __init__(self, requestor_mgr):
+    ACCEPT_QUEUE_LEN = 32
+
+    def __init__(self, requestor_mgr, realm_requestor):
         self._requestor_mgr = requestor_mgr
-        self._cmd_listening_sockets = []
+        self._realm_requestor = realm_requestor
+        self._cmd_listening_sockets = set()
         self._cmd_connections_by_socket = {}
 
     def add_cmd_listener(self, sock_path):
@@ -259,20 +341,29 @@ class CommandConnectionManager(object):
         if os.path.exists(sock_path):
             os.remove(sock_path)
         s.bind(sock_path)
-        s.listen(10)
-        self._cmd_listening_sockets.append(s)
+        s.listen(self.ACCEPT_QUEUE_LEN)
+        self._cmd_listening_sockets.add(s)
 
     def _handle_cmd_listening_socket(self, s):
-        socket = s.accept()
+        try:
+            socket = s.accept()
+        except IOError, e:
+            print "Received exception %s while accepting new cmd conn" % repr(e)
+            return
         connection = CommandConnection(weakref.proxy(self), socket)
         self._cmd_connections_by_socket[socket] = connection
 
-    def remove_cmd_socket(self, socket):
-        del self._cmd_connections_by_socket[socket]
+    def remove_cmd_conn(self, conn):
+        del self._cmd_connections_by_socket[conn.socket]
+
+    @property
+    def requestor_mgr(self):
+        return self._requestor_mgr
 
     @property
     def sockets(self):
-        return self._cmd_listening_socket
+        return list(self._cmd_listening_sockets) + \
+                self._cmd_connections_by_socket.keys()
 
     def sockets_ready(self, ready_sockets):
         for ready_socket in ready_sockets:
@@ -303,9 +394,32 @@ class SocketLoop(object):
     def add_socket_provider(self, socket_provider):
         self._socket_providers.append(socket_provider)
 
-   def quit(self):
+    def quit(self):
         self._run = True
 
+class RealmData(object):
+    def __init__(self, realm):
+        self.realm = realm
+
+        self.dhcp_local_port = DHCP_LOCAL_PORT
+        if realm == 'fsmi-sec':
+            self.vid = 386
+            self.requestor_ip = "10.0.97.141"
+            self.dhcp_server_ips = ["10.0.97.133"]
+        elif realm == 'fsmi':
+            self.vid = 808
+            self.requestor_ip = "10.0.98.141"
+            self.dhcp_server_ips = ["10.0.98.133"]
+        elif realm == 'fsmi-prio':
+            self.vid = 1
+            self.requestor_ip = "10.0.99.141"
+            self.dhcp_server_ips = ["10.0.99.133"]
+        else:
+            sys.stderr.write("E: Unknown realm %s.\n" % realm)
+            sys.exit(1)
+def get_realm_data(realm):
+    realm_data = RealmData(realm)
+    return realm_data
 
 def main():
     loop = SocketLoop()
@@ -313,5 +427,9 @@ def main():
     requestor_mgr = RequestorManager()
     loop.add_socket_provider(requestor_mgr)
     requestor_mgr.add_requestor("127.0.0.1")
+    cmd_conn_mgr = CommandConnectionManager(requestor_mgr,
+            realm_requestor=get_realm_data)
+    loop.add_socket_provider(cmd_conn_mgr)
+    cmd_conn_mgr.add_cmd_listener('/tmp/dhcprequestorsock')
 
     loop.run()
