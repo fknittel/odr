@@ -31,7 +31,7 @@ import weakref
 import machasher
 import re
 
-class AddressRequest(object):
+class DhcpAddressRequest(object):
     AR_DISCOVER = 1
     AR_REQUEST = 2
 
@@ -170,16 +170,13 @@ class AddressRequest(object):
         elif self._last_packet is not None:
             self._resend_packet()
 
-class AddressRequestor(DhcpClient):
+class DhcpAddressRequestor(DhcpClient):
     def __init__(self, **kwargs):
         self.local_ip = kwargs["local_ip"]
         self.local_port = kwargs.get("local_port", 67)
         DhcpClient.__init__(self, str(self.local_ip), self.local_port, 67)
         self.__requests = {}
         self.BindToAddress()
-
-    def handle_socket(self):
-        self.GetNextDhcpPacket(timeout = 0)
 
     def add_request(self, request):
         self.__requests[request.xid] = request
@@ -212,62 +209,91 @@ class AddressRequestor(DhcpClient):
     def HandleDhcpNack(self, packet):
         self._handle_packet('handle_dhcp_nack', offer_packet)
 
-class RequestorManager(object):
-    def __init__(self):
-        self._requestors_by_socket = {}
+    @property
+    def socket(self):
+        return self.dhcp_socket
+
+    def handle_socket(self):
+        self.GetNextDhcpPacket(timeout = 0)
+
+class DhcpAddressRequestorManager(object):
+    def __init__(self, request_factory):
         self._requestors_by_ip = {}
+        self._request_factory = request_factory
 
-    def add_requestor(self, local_ip, local_port=67):
-        requestor = AddressRequestor(local_ip=local_ip, local_port=local_port)
-        self._requestors_by_socket[requestor.dhcp_socket] = requestor
-        self._requestors_by_ip[local_ip] = requestor
+    def add_requestor(self, requestor):
+        self._requestors_by_ip[requestor.local_ip] = requestor
 
-    def add_request(self, success_handler_clb, failure_handler_clb, mac_addr,
-            local_ip, server_ips=None):
+    def add_request(self, local_ip, **kwargs):
         if not local_ip in self._requestors_by_ip:
             raise RuntimeError('request for unsupported local IP %s' % local_ip)
         requestor = self._requestors_by_ip[local_ip]
-        request = AddressRequest(mac_addr=hwmac(mac_addr),
-                local_ip=ipv4(local_ip), local_port=requestor.local_port,
-                server_ips=server_ips, success_handler_clb=success_handler_clb,
-                failure_handler_clb=failure_handler_clb,
-                requestor=weakref.proxy(requestor))
+        request = self._request_factory(requestor=weakref.proxy(requestor),
+                **kwargs)
         requestor.add_request(request)
 
-    @property
-    def sockets(self):
-        return self._requestors_by_socket.keys()
-
-    def sockets_ready(self, ready_sockets):
-        for ready_socket in ready_sockets:
-            if ready_socket in self._requestors_by_socket:
-                requestor = self._requestors_by_socket[ready_socket]
-                requestor.handle_socket()
-
 class CommandConnection(object):
-    CC_RET_FAILURE = 1
-    CC_RET_SUCCESS = 2
-
-    def __init__(self, conn_mgr, socket):
-        self._conn_mgr = conn_mgr
+    def __init__(self, sloop, socket):
+        self._sloop = sloop
         self._socket = socket
+
+    def __del__(self):
+        self._socket.close()
 
     @property
     def socket(self):
         return self._socket
 
-    @staticmethod
-    def _write_ret(ret_fn, val):
-        ret_fp = open(ret_fn, 'wb')
+    def handle_socket(self):
+        # We assume that everything is sent in one single chunk.
+        try:
+            data = self._socket.read()
+            params = {}
+            for p in data.split(' '):
+                k, v = p.split('=')
+                params[k] = v
+        except IOError, e:
+            print "IOError in cmd handle"
+            return
+        self.handle_command(params)
+
+    def handle_command(self, params):
+        """The handle_command function is called as soon as a command was
+        received and parsed by CommandConnection.  A sub-class should implement
+        the stub function and process the command.
+        """
+
+class OpenVpnCmdConn(CommandConnection):
+    CC_RET_FAILURE = 1
+    CC_RET_SUCCESS = 2
+
+    USERNAME_RE = r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?@(?P<domain>[^/@]+)(/(?P<realm>[^/@]+))?$'
+
+    def __init__(self, sloop, socket, request_realm_data_clb, add_request_clb,
+            full_username_to_mac_clb):
+        super(OpenVpnCmdConn, self).__init__(sloop, socket)
+        self._request_realm_data = request_realm_data_clb
+        self._add_request = add_request_clb
+        self._full_username_to_mac = full_username_to_mac_clb
+        self._ret_fn = None
+        self._wrote_ret = False
+
+    def __del__(self):
+        if self._ret_fn is not None and not self._wrote_ret:
+            self._write_ret(self.CC_RET_FAILURE)
+        CommandConnection.__del__(self)
+
+    def _write_ret(self, val):
+        ret_fp = open(self._ret_fn, 'wb')
         ret_fp.write('%d' % val);
         ret_fp.close()
+        self._wrote_ret = True
 
-    @staticmethod
-    def _success_handler(config_fn, ret_fn, res, realm_data):
-        conf_fp = open(config_fn, 'wb')
+    def _success_handler(self, res):
+        conf_fp = open(self._config_fn, 'wb')
         conf_fp.write('ifconfig-push %s %s\n' % (res['ip-address'],
                 res['subnet-mask']))
-        conf_fp.write('vlan-pvid %d\n' % realm_data.vid)
+        conf_fp.write('vlan-pvid %d\n' % self._realm_data.vid)
         conf_fp.write('push "ip-win32 dynamic"\n')
         conf_fp.write('push "route-gateway %s"\n' % (res['gateway']))
         conf_fp.write('push "redirect-gateway def1"\n')
@@ -276,126 +302,119 @@ class CommandConnection(object):
         conf_fp.write('push "dhcp-option DOMAIN %s"\n' % res['domain'])
         conf_fp.close()
 
-        self._write_ret(ret_fn, self.CC_RET_SUCCESS)
+        self._write_ret(self.CC_RET_SUCCESS)
 
-    @staticmethod
-    def _failure_handler(ret_fn):
-        self._write_ret(ret_fn, self.CC_RET_FAILURE)
+    def _failure_handler(self):
+        self._write_ret(self.CC_RET_FAILURE)
 
-    def handle_socket(self):
-        # We assume that everything is sent in one single chunk.
+    def handle_command(self, params):
         try:
-            data = self._socket.read()
-            params = {}
-            for p in data.split(' '):
-                k, v = p.split(' ')
-                params[k] = v
-        except IOError, e:
-            print "IOError in cmd handle"
-            return
-
-        try:
-            full_username = params['full_username']
-            ret_fn = params['ret_file_name']
-            config_fn = params['config_file_name']
+            self._full_username = params['full_username']
+            self._ret_fn = params['ret_file_name']
+            self._config_fn = params['config_file_name']
         except KeyError, e:
             print "command is missing a parameter: %s" % e.args
             return
 
-        USERNAME_RE = r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?@(?P<domain>[^/@]+)(/(?P<realm>[^/@]+))?$'
-
-        m = re.match(USERNAME_RE, full_username)
+        m = re.match(self.USERNAME_RE, self._full_username)
         if m is None:
-            print "username in unexpected format: %s" % full_username
+            print "username in unexpected format: %s" % self._full_username
             return
-        realm = m.group('realm')
+        self._realm = m.group('realm')
 
-        mac_addr = machasher.hash_login_to_mac(full_username)
+        self._mac_addr = self._full_username_to_mac(self._full_username)
 
-        realm_data = get_realm_data(realm=realm)
+        self._realm_data = self._request_realm_data(realm=self._realm)
 
-        def success_handler(res):
-            self._success_handler(config_fn, ret_fn, res, realm_data)
-
-        def failure_handler():
-            self._failure_handler(ret_fn)
-
-        self._conn_mgr.requestor_mgr.add_request(
-                success_handler_clb=success_handler,
-                failure_handler_clb=failure_handler,
-                mac_addr=mac_addr, local_ip=realm_data.requestor_ip,
+        self._add_request(success_handler_clb=self._success_handler,
+                failure_handler_clb=self._failure_handler,
+                mac_addr=hwmac(mac_addr),
+                local_ip=ipv4(realm_data.requestor_ip),
                 server_ips=realm_data.dhcp_server_ips)
 
-class CommandConnectionManager(object):
+class CommandConnectionListener(object):
     ACCEPT_QUEUE_LEN = 32
 
-    def __init__(self, requestor_mgr, realm_requestor):
-        self._requestor_mgr = requestor_mgr
-        self._realm_requestor = realm_requestor
-        self._cmd_listening_sockets = set()
-        self._cmd_connections_by_socket = {}
+    def __init__(self, sloop, socket_path, cmd_conn_factory):
+        self._sloop = sloop
+        self._factory = cmd_conn_factory
 
-    def add_cmd_listener(self, sock_path):
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.setblocking(False)
-        if os.path.exists(sock_path):
-            os.remove(sock_path)
-        s.bind(sock_path)
-        s.listen(self.ACCEPT_QUEUE_LEN)
-        self._cmd_listening_sockets.add(s)
+        # TODO: Set proper permissions
+        self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._socket.setblocking(False)
+        if os.path.exists(socket_path):
+            os.remove(socket_path)
+        self._socket.bind(socket_path)
+        self._socket.listen(self.ACCEPT_QUEUE_LEN)
 
-    def _handle_cmd_listening_socket(self, s):
+    def __del__(self):
+        self._socket.close()
+
+    @property
+    def socket(self):
+        return self._socket
+
+    def handle_socket(self):
         try:
-            socket = s.accept()
+            socket = self._socket.accept()
         except IOError, e:
             print "Received exception %s while accepting new cmd conn" % repr(e)
             return
-        connection = CommandConnection(weakref.proxy(self), socket)
-        self._cmd_connections_by_socket[socket] = connection
-
-    def remove_cmd_conn(self, conn):
-        del self._cmd_connections_by_socket[conn.socket]
-
-    @property
-    def requestor_mgr(self):
-        return self._requestor_mgr
-
-    @property
-    def sockets(self):
-        return list(self._cmd_listening_sockets) + \
-                self._cmd_connections_by_socket.keys()
-
-    def sockets_ready(self, ready_sockets):
-        for ready_socket in ready_sockets:
-            if ready_socket in self._cmd_listening_sockets:
-                self._handle_cmd_listening_socket(self, ready_socket)
-                requestor = self._requestors_by_socket[ready_socket]
-                requestor.handle_socket()
-            elif ready_socket in self._cmd_connections_by_socket:
-                conn = self._cmd_connections_by_socket[ready_socket]
-                conn.handle_socket()
+        conn = self._factory(sloop, socket)
+        self._sloop.add_socket_handler(conn)
 
 class SocketLoop(object):
     def __init__(self):
-        self._socket_providers = []
+        self._socket_handlers = {}
+        self._idle_handlers = []
         self._run = True
-        self.timeout = 1
+        self.timeout = 0.5
 
     def run(self):
         while self._run:
-            sockets = []
-            for socket_provider in self._socket_providers:
-                sockets += socket_provider.sockets
+            sockets = self._socket_handlers.keys()
             ready_input_sockets, _, _ = select.select(sockets, [], [],
                     self.timeout)
-            for socket_provider in self._socket_providers:
-                socket_provider.sockets_ready(sockets)
+            for ready_input_socket in ready_input_sockets:
+                socket_handler = self._socket_handlers[ready_input_socket]
+                socket_handler.handle_socket()
+            for idle_handler in self._idle_handlers:
+                idle_handler()
 
-    def add_socket_provider(self, socket_provider):
-        self._socket_providers.append(socket_provider)
+    def add_socket_handler(self, socket_handler):
+        self._socket_handlers[socket_handler.socket] = socket_handler
+
+    def del_socket_handler(self, socket_handler):
+        del self._socket_handlers[socket_handler.socket]
+
+    def add_idle_handler(self, idle_handler):
+        self._idle_handlers.append(idle_handler)
 
     def quit(self):
         self._run = True
+
+class TimeoutManager(object):
+    def __init__(self):
+        self._timeout_objects = []
+
+    def add_timeout_object(self, timeout_object):
+        self._timeout_objects.append(timeout_object)
+
+    def del_timeout_object(self, timeout_object):
+        self._timeout_objects.remove(timeout_object)
+
+    def check_timeouts(self):
+        old_tos = self._timeout_objects
+        self._timeout_objects = []
+        t = time.time()
+        for timeout_object in old_tos:
+            if timeout_object.timeout > t:
+                self.add_timeout_object(timeout_object)
+            else:
+                timeout_object.handle_timeout()
+
+    def __call__(self):
+        self.check_timeouts()
 
 class RealmData(object):
     def __init__(self, realm):
@@ -417,19 +436,36 @@ class RealmData(object):
         else:
             sys.stderr.write("E: Unknown realm %s.\n" % realm)
             sys.exit(1)
+
 def get_realm_data(realm):
     realm_data = RealmData(realm)
     return realm_data
 
 def main():
-    loop = SocketLoop()
+    UNIX_SOCKETS = ['/tmp/bla.sock']
+    LISTENING_IPS = ['127.0.0.1']
 
-    requestor_mgr = RequestorManager()
-    loop.add_socket_provider(requestor_mgr)
-    requestor_mgr.add_requestor("127.0.0.1")
-    cmd_conn_mgr = CommandConnectionManager(requestor_mgr,
-            realm_requestor=get_realm_data)
-    loop.add_socket_provider(cmd_conn_mgr)
-    cmd_conn_mgr.add_cmd_listener('/tmp/dhcprequestorsock')
+    sloop = SocketLoop()
+    timeout_mgr = TimeoutManager()
+    sloop.add_idle_handler(timeout_mgr)
+
+    requestor_mgr = DhcpAddressRequestorManager(
+            request_factory=DhcpAddressRequest)
+
+    def create_vpn_cmd_conn(sloop, socket):
+        return OpenVpnCmdConn(sloop, socket,
+                request_realm_data_clb=get_realm_data,
+                add_request_clb=requestor_mgr.add_request,
+                full_username_to_mac_clb=machasher.hash_login_to_mac)
+
+    for unix_socket_fn in UNIX_SOCKETS:
+        cmd_listener = CommandConnectionListener(weakref.proxy(sloop),
+                unix_socket_fn, create_vpn_cmd_conn)
+        sloop.add_socket_handler(cmd_listener)
+
+    for listening_ip in LISTENING_IPS:
+        requestor = DhcpAddressRequestor(local_ip=listening_ip)
+        sloop.add_socket_handler(requestor)
+        requestor_mgr.add_requestor(requestor)
 
     loop.run()
