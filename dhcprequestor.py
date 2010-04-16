@@ -25,6 +25,9 @@ from pydhcplib.type_strlist import strlist
 from pydhcplib.type_ipv4 import ipv4
 from pydhcplib.type_hwmac import hwmac
 import random
+import socket
+import select
+import weakref
 
 class AddressRequest(object):
     AR_DISCOVER = 1
@@ -207,38 +210,108 @@ class AddressRequestor(DhcpClient):
     def HandleDhcpNack(self, packet):
         self._handle_packet('handle_dhcp_nack', offer_packet)
 
-class DhcpRequestorLoop(object):
+class RequestorManager(object):
     def __init__(self):
-        self.timeout = 1
         self._requestors_by_socket = {}
         self._requestors_by_ip = {}
-        self._run = True
-
-    def run(self):
-        while self._run:
-            sockets = self._requestors_by_socket.keys()
-            ready_input_sockets, _, _ = select.select(sockets, [], [],
-                    self.timeout)
-            for ready_socket in ready_input_sockets:
-                if ready_socket in self._requestors_by_socket:
-                    requestor = self._requestors_by_socket[ready_socket]
-                    requestor.handle_socket()
-
-            for requestor in self._requestors_by_socket.values():
-                requestor.check_timeouts()
-
-    def quit(self):
-        self._run = True
 
     def add_requestor(self, local_ip, local_port=67):
         requestor = AddressRequestor(local_ip=local_ip, local_port=local_port)
         self._requestors_by_socket[requestor.dhcp_socket] = requestor
         self._requestors_by_ip[local_ip] = requestor
 
-    def add_request(self, mac_addr, local_ip, server_ips=None):
+    def add_request(self, success_handler_clb, failure_handler_clb, mac_addr,
+            local_ip, server_ips=None):
         if not local_ip in self._requestors_by_ip:
             raise RuntimeError('request for unsupported local IP %s' % local_ip)
         requestor = self._requestors_by_ip[local_ip]
-        client = AddressRequest(mac_addr=hwmac(mac_addr),
+        request = AddressRequest(mac_addr=hwmac(mac_addr),
                 local_ip=ipv4(local_ip), local_port=requestor.local_port,
-                server_ips=server_ips)
+                server_ips=server_ips, success_handler_clb=success_handler_clb,
+                failure_handler_clb=failure_handler_clb,
+                requestor=weakref.proxy(requestor))
+        requestor.add_request(request)
+
+    @property
+    def sockets(self):
+        return self._requestors_by_socket.keys()
+
+    def sockets_ready(self, ready_sockets):
+        for ready_socket in ready_sockets:
+            if ready_socket in self._requestors_by_socket:
+                requestor = self._requestors_by_socket[ready_socket]
+                requestor.handle_socket()
+
+class CommandConnection(object):
+    def __init__(self, conn_mgr, socket):
+        self._conn_mgr = conn_mgr
+        self._socket = socket
+
+class CommandConnectionManager(object):
+    def __init__(self, requestor_mgr):
+        self._requestor_mgr = requestor_mgr
+        self._cmd_listening_sockets = []
+        self._cmd_connections_by_socket = {}
+
+    def add_cmd_listener(self, sock_path):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.setblocking(False)
+        if os.path.exists(sock_path):
+            os.remove(sock_path)
+        s.bind(sock_path)
+        s.listen(10)
+        self._cmd_listening_sockets.append(s)
+
+    def _handle_cmd_listening_socket(self, s):
+        socket = s.accept()
+        connection = CommandConnection(weakref.proxy(self), socket)
+        self._cmd_connections_by_socket[socket] = connection
+
+    def remove_cmd_socket(self, socket):
+        del self._cmd_connections_by_socket[socket]
+
+    @property
+    def sockets(self):
+        return self._cmd_listening_socket
+
+    def sockets_ready(self, ready_sockets):
+        for ready_socket in ready_sockets:
+            if ready_socket in self._cmd_listening_sockets:
+                self._handle_cmd_listening_socket(self, ready_socket)
+                requestor = self._requestors_by_socket[ready_socket]
+                requestor.handle_socket()
+            elif ready_socket in self._cmd_connections_by_socket:
+                conn = self._cmd_connections_by_socket[ready_socket]
+                conn.handle_socket()
+
+class SocketLoop(object):
+    def __init__(self):
+        self._socket_providers = []
+        self._run = True
+        self.timeout = 1
+
+    def run(self):
+        while self._run:
+            sockets = []
+            for socket_provider in self._socket_providers:
+                sockets += socket_provider.sockets
+            ready_input_sockets, _, _ = select.select(sockets, [], [],
+                    self.timeout)
+            for socket_provider in self._socket_providers:
+                socket_provider.sockets_ready(sockets)
+
+    def add_socket_provider(self, socket_provider):
+        self._socket_providers.append(socket_provider)
+
+   def quit(self):
+        self._run = True
+
+
+def main():
+    loop = SocketLoop()
+
+    requestor_mgr = RequestorManager()
+    loop.add_socket_provider(requestor_mgr)
+    requestor_mgr.add_requestor("127.0.0.1")
+
+    loop.run()
