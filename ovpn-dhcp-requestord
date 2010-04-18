@@ -111,7 +111,7 @@ class OpenVpnCmdConn(CommandConnection):
             self._add_request(success_handler_clb=self._success_handler,
                     failure_handler_clb=self._failure_handler,
                     mac_addr=self._mac_addr,
-                    local_ip=self._realm_data.requestor_ip,
+                    local_ip=self._realm_data.dhcp_listening_ip,
                     local_port=self._realm_data.dhcp_local_port,
                     server_ips=self._realm_data.dhcp_server_ips)
         except:
@@ -140,14 +140,20 @@ class RealmData(object):
             sys.stderr.write("E: Unknown realm %s.\n" % realm)
             sys.exit(1)
 
+#[realm fsmi-sec]
+#vid = 386
+#dhcp_listening_ip = 10.0.97.141
+#dhcp_server_ips = 10.0.97.133
+#dhcp_local_port = 67
+
+
 def get_realm_data(realm):
     realm_data = RealmData(realm)
     return realm_data
 
 def main():
-    UNIX_SOCKETS = ['/tmp/bla.sock']
-    LISTENING_IPS = ['10.0.97.133', '10.0.98.133', '10.0.99.133']
-    #LISTENING_IPS = ['127.0.0.1']
+    cfg = SafeConfigParser()
+    cfg.read(CONFIG_FILE)
 
     sloop = SocketLoop()
     timeout_mgr = TimeoutManager()
@@ -166,13 +172,15 @@ def main():
                 add_request_clb=requestor_mgr.add_request,
                 full_username_to_mac_clb=machasher.hash_login_to_mac)
 
-    for unix_socket_fn in UNIX_SOCKETS:
+    for unix_socket_fn in [u.strip() for u in \
+            cfg.get('commands', 'sockets').split(',')]:
         cmd_listener = CommandConnectionListener(weakref.proxy(sloop),
                 unix_socket_fn, create_vpn_cmd_conn)
         sloop.add_socket_handler(cmd_listener)
 
-    for listening_ip in LISTENING_IPS:
-        requestor = DhcpAddressRequestor(local_ip=listening_ip)
+    for realm_section in [s for s in cfg.sections() if s.startswith('realm ')]:
+        dhcp_listening_ip = cfg.get(realm_section, 'dhcp_listening_ip')
+        requestor = DhcpAddressRequestor(local_ip=dhcp_listening_ip)
         sloop.add_socket_handler(requestor)
         requestor_mgr.add_requestor(requestor)
 
