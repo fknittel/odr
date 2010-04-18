@@ -1,0 +1,182 @@
+#!/usr/bin/python
+# vim:set encoding=utf-8 ft=python ts=8 sw=4 sts=4 et cindent:
+
+# ovpn-dhcp-requestord
+#
+# Copyright (C) 2010 Fabian Knittel <fabian.knittel@avona.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+import sys
+sys.path.append('../pydhcplib/pydhcplib')
+import weakref
+import re
+import traceback
+
+import machasher
+from cmdconnection import CommandConnection, CommandConnectionListener
+from timeoutmgr import TimeoutManager
+from socketloop import SocketLoop
+from dhcprequestor import DhcpAddressRequest, DhcpAddressRequestor, \
+        DhcpAddressRequestorManager
+
+class OpenVpnCmdConn(CommandConnection):
+    CC_RET_FAILURE = 1
+    CC_RET_SUCCESS = 2
+    CC_RET_DEFERRED = 3
+
+    USERNAME_RE = r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?@(?P<domain>[^/@]+)(/(?P<realm>[^/@]+))?$'
+
+    def __init__(self, sloop, socket, request_realm_data_clb, add_request_clb,
+            full_username_to_mac_clb):
+        super(OpenVpnCmdConn, self).__init__(sloop, socket)
+        self._request_realm_data = request_realm_data_clb
+        self._add_request = add_request_clb
+        self._full_username_to_mac = full_username_to_mac_clb
+        self._ret_fn = None
+        self._wrote_ret = False
+
+    def __del__(self):
+        if self._ret_fn is not None and not self._wrote_ret:
+            self._write_ret(self.CC_RET_FAILURE)
+        CommandConnection.__del__(self)
+
+    def _write_ret(self, val):
+        ret_fp = open(self._ret_fn, 'wb')
+        ret_fp.write('%d' % val);
+        ret_fp.close()
+        self._wrote_ret = True
+
+    def _success_handler(self, res):
+        conf_fp = open(self._config_fn, 'wb')
+        conf_fp.write('ifconfig-push %s %s\n' % (res['ip-address'],
+                res['subnet-mask']))
+        conf_fp.write('vlan-pvid %d\n' % self._realm_data.vid)
+        conf_fp.write('push "ip-win32 dynamic"\n')
+        conf_fp.write('push "route-gateway %s"\n' % (res['gateway']))
+        conf_fp.write('push "redirect-gateway def1"\n')
+        for dns_ip in res['dns']:
+            conf_fp.write('push "dhcp-option DNS %s"\n' % dns_ip)
+        conf_fp.write('push "dhcp-option DOMAIN %s"\n' % res['domain'])
+        conf_fp.close()
+
+        self._write_ret(self.CC_RET_SUCCESS)
+
+    def _failure_handler(self):
+        self._write_ret(self.CC_RET_FAILURE)
+
+    def handle_command(self, cmd):
+        try:
+            params = {}
+            for p in cmd.split(' '):
+                k, v = p.split('=')
+                params[k] = v
+        except IOError, e:
+            print "IOError in cmd handle"
+            return
+        try:
+            self._full_username = params['full_username']
+            self._ret_fn = params['ret_file_name']
+            self._config_fn = params['config_file_name']
+        except KeyError, e:
+            self.send_cmd('FAIL')
+            self._write_ret(self.CC_RET_FAILURE)
+            print "command is missing a parameter: %s" % e.args
+            return
+
+        m = re.match(self.USERNAME_RE, self._full_username)
+        if m is None:
+            self.send_cmd('FAIL')
+            self._write_ret(self.CC_RET_FAILURE)
+            print "username in unexpected format: %s" % self._full_username
+            return
+        self._realm = m.group('realm')
+        self._realm_data = self._request_realm_data(realm=self._realm)
+        self.send_cmd('OK')
+
+        self._mac_addr = self._full_username_to_mac(self._full_username)
+
+        try:
+            self._add_request(success_handler_clb=self._success_handler,
+                    failure_handler_clb=self._failure_handler,
+                    mac_addr=self._mac_addr,
+                    local_ip=self._realm_data.requestor_ip,
+                    local_port=self._realm_data.dhcp_local_port,
+                    server_ips=self._realm_data.dhcp_server_ips)
+        except:
+            print traceback.print_exc()
+
+class RealmData(object):
+    def __init__(self, realm):
+        self.realm = realm
+
+        self.dhcp_local_port = 67
+        if realm == 'fsmi-sec':
+            self.vid = 386
+            #self.requestor_ip = "127.0.0.1"
+            self.requestor_ip = "10.0.97.141"
+            #self.dhcp_server_ips = ["127.0.0.2", "127.0.0.3"]
+            self.dhcp_server_ips = ["10.0.97.133"]
+        elif realm == 'fsmi':
+            self.vid = 808
+            self.requestor_ip = "10.0.98.141"
+            self.dhcp_server_ips = ["10.0.98.133"]
+        elif realm == 'fsmi-prio':
+            self.vid = 1
+            self.requestor_ip = "10.0.99.141"
+            self.dhcp_server_ips = ["10.0.99.133"]
+        else:
+            sys.stderr.write("E: Unknown realm %s.\n" % realm)
+            sys.exit(1)
+
+def get_realm_data(realm):
+    realm_data = RealmData(realm)
+    return realm_data
+
+def main():
+    UNIX_SOCKETS = ['/tmp/bla.sock']
+    LISTENING_IPS = ['10.0.97.133', '10.0.98.133', '10.0.99.133']
+    #LISTENING_IPS = ['127.0.0.1']
+
+    sloop = SocketLoop()
+    timeout_mgr = TimeoutManager()
+    sloop.add_idle_handler(timeout_mgr)
+
+    def create_dhcp_address_request(**kwargs):
+        return DhcpAddressRequest(
+                timeout_mgr=weakref.proxy(timeout_mgr), **kwargs)
+
+    requestor_mgr = DhcpAddressRequestorManager(
+            request_factory=create_dhcp_address_request)
+
+    def create_vpn_cmd_conn(sloop, socket):
+        return OpenVpnCmdConn(sloop, socket,
+                request_realm_data_clb=get_realm_data,
+                add_request_clb=requestor_mgr.add_request,
+                full_username_to_mac_clb=machasher.hash_login_to_mac)
+
+    for unix_socket_fn in UNIX_SOCKETS:
+        cmd_listener = CommandConnectionListener(weakref.proxy(sloop),
+                unix_socket_fn, create_vpn_cmd_conn)
+        sloop.add_socket_handler(cmd_listener)
+
+    for listening_ip in LISTENING_IPS:
+        requestor = DhcpAddressRequestor(local_ip=listening_ip)
+        sloop.add_socket_handler(requestor)
+        requestor_mgr.add_requestor(requestor)
+
+    sloop.run()
+
+if __name__ == '__main__':
+    main()

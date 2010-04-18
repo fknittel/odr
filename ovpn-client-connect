@@ -1,0 +1,59 @@
+#!/usr/bin/python
+# vim:set encoding=utf-8 ft=python ts=8 sw=4 sts=4 et cindent:
+
+# ovpn-client-connect
+#
+# Copyright (C) 2010 Fabian Knittel <fabian.knittel@avona.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+import os
+import sys
+import socket
+sys.path.append('../pydhcplib/pydhcplib')
+import cmdconnection
+
+
+class flushedstream(object):
+    def __init__(self, f):
+        self.f = f
+    def write(self, x):
+        self.f.write(x)
+        self.f.flush()
+sys.stdout = flushedstream(sys.stdout)
+sys.stderr = flushedstream(sys.stderr)
+
+def write_ret(ret_fn, val):
+    ret_fp = open(ret_fn, 'wb')
+    ret_fp.write('%d' % val);
+    ret_fp.close()
+
+cfg_fn = os.environ['client_connect_config_file']
+ret_fn = os.environ['client_connect_deferred_file']
+full_username = os.environ['username']
+
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect('/tmp/bla.sock')
+write_ret(ret_fn, 3)
+
+try:
+    s.send('full_username=%s ret_file_name=%s config_file_name=%s\n' % (
+            full_username, ret_fn, cfg_fn))
+    ret = s.recv(1024)
+    print 'Received: %s' % ret
+    if ret != 'OK\n':
+        raise RuntimeError('starting dhcp request failed')
+except:
+    write_ret(ret_fn, 1)
+    raise
