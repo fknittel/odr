@@ -38,7 +38,7 @@ class TimeoutManager(object):
         t = time.time()
         for timeout_object in old_tos:
             if timeout_object.timeout_time > t:
-                self.add_timeout_object(timeout_object)
+                self._timeout_objects.append(timeout_object)
             else:
                 timeout_object.handle_timeout()
 

@@ -23,6 +23,8 @@ sys.path.append('../pydhcplib/pydhcplib')
 import weakref
 import re
 import traceback
+from optparse import OptionParser
+from ConfigParser import SafeConfigParser
 
 import machasher
 from cmdconnection import CommandConnection, CommandConnectionListener
@@ -30,6 +32,8 @@ from timeoutmgr import TimeoutManager
 from socketloop import SocketLoop
 from dhcprequestor import DhcpAddressRequest, DhcpAddressRequestor, \
         DhcpAddressRequestorManager
+
+CONFIG_FILE = '/etc/ovpn-dhcp-requestord.conf'
 
 class OpenVpnCmdConn(CommandConnection):
     CC_RET_FAILURE = 1
@@ -118,42 +122,18 @@ class OpenVpnCmdConn(CommandConnection):
             print traceback.print_exc()
 
 class RealmData(object):
-    def __init__(self, realm):
-        self.realm = realm
-
-        self.dhcp_local_port = 67
-        if realm == 'fsmi-sec':
-            self.vid = 386
-            #self.requestor_ip = "127.0.0.1"
-            self.requestor_ip = "10.0.97.141"
-            #self.dhcp_server_ips = ["127.0.0.2", "127.0.0.3"]
-            self.dhcp_server_ips = ["10.0.97.133"]
-        elif realm == 'fsmi':
-            self.vid = 808
-            self.requestor_ip = "10.0.98.141"
-            self.dhcp_server_ips = ["10.0.98.133"]
-        elif realm == 'fsmi-prio':
-            self.vid = 1
-            self.requestor_ip = "10.0.99.141"
-            self.dhcp_server_ips = ["10.0.99.133"]
-        else:
-            sys.stderr.write("E: Unknown realm %s.\n" % realm)
-            sys.exit(1)
-
-#[realm fsmi-sec]
-#vid = 386
-#dhcp_listening_ip = 10.0.97.141
-#dhcp_server_ips = 10.0.97.133
-#dhcp_local_port = 67
-
-
-def get_realm_data(realm):
-    realm_data = RealmData(realm)
-    return realm_data
+    pass
 
 def main():
+    parser = OptionParser()
+    parser.add_option("-c", "--config", dest="config_file",
+            help="Configuration file", default=CONFIG_FILE)
+    (options, args) = parser.parse_args()
+    if len(args) != 0:
+            parser.error("incorrect number of arguments")
+
     cfg = SafeConfigParser()
-    cfg.read(CONFIG_FILE)
+    cfg.read(options.config_file)
 
     sloop = SocketLoop()
     timeout_mgr = TimeoutManager()
@@ -165,6 +145,20 @@ def main():
 
     requestor_mgr = DhcpAddressRequestorManager(
             request_factory=create_dhcp_address_request)
+
+    def get_realm_data(realm):
+        sect = 'realm %s' % realm
+        if cfg.has_section(sect):
+            realm_data = RealmData()
+            realm_data.dhcp_local_port = cfg.getint(sect, 'dhcp_local_port')
+            realm_data.vid = cfg.getint(sect, 'vid')
+            realm_data.dhcp_listening_ip = cfg.get(sect, 'dhcp_listening_ip')
+            realm_data.dhcp_server_ips = [i.strip() for i in \
+                    cfg.get(sect, 'dhcp_server_ips').split(',')]
+            return realm_data
+        else:
+            sys.stderr.write("E: Unknown realm %s.\n" % realm)
+            return None
 
     def create_vpn_cmd_conn(sloop, socket):
         return OpenVpnCmdConn(sloop, socket,
