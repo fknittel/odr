@@ -122,7 +122,8 @@ class DhcpAddressRequest(object):
     def handle_dhcp_offer(self, offer_packet):
         if self._state != self.AR_DISCOVER:
             return
-        print "Received offer:"
+        print "Received offer"
+        self._timeout_mgr.del_timeout_object(self)
         req_packet = self._generate_request(offer_packet)
         self._retrieve_server_ip(req_packet)
         self._state = self.AR_REQUEST
@@ -131,8 +132,9 @@ class DhcpAddressRequest(object):
     def handle_dhcp_ack(self, packet):
         if self._state != self.AR_REQUEST:
             return
-        self._requestor.del_request(self)
+        print "Received ACK"
         self._timeout_mgr.del_timeout_object(self)
+        self._requestor.del_request(self)
         result = {}
         result['domain'] = ''.join(map(chr,
                 packet.GetOption('domain_name')))
@@ -157,8 +159,8 @@ class DhcpAddressRequest(object):
         self._success_handler(result)
 
     def handle_dhcp_nack(self, packet):
-        self._requestor.del_request(self)
         self._timeout_mgr.del_timeout_object(self)
+        self._requestor.del_request(self)
         self._failure_handler()
 
     @property
@@ -166,6 +168,7 @@ class DhcpAddressRequest(object):
         return self._timeout_time
 
     def handle_timeout(self):
+        print "handling timeout for %d" % self.xid
         if self._packet_retries >= self._max_retries:
             self._requestor.del_request(self)
             print "Timeout for reply to packet in state %d" % \
@@ -197,23 +200,23 @@ class DhcpAddressRequestor(DhcpClient):
                 request.handle_timeout()
 
     def _handle_packet(self, clb_name, packet):
-        xid = packet.GetOption('xid')
-        if xid not in self.__requests:
-            print "Ignoring answer with xid %s" % repr(xid)
+        xid = ipv4(packet.GetOption('xid'))
+        if xid.int() not in self.__requests:
+            print "Ignoring answer with xid %s" % repr(xid.int())
             return
 
-        request = self.__requests[xid]
-        clb = getaddr(request, clb_name)
-        clb(offer_packet)
+        request = self.__requests[xid.int()]
+        clb = getattr(request, clb_name)
+        clb(packet)
 
-    def HandleDhcpOffer(self, offer_packet):
-        self._handle_packet('handle_dhcp_offer', offer_packet)
+    def HandleDhcpOffer(self, packet):
+        self._handle_packet('handle_dhcp_offer', packet)
 
     def HandleDhcpAck(self, packet):
-        self._handle_packet('handle_dhcp_ack', offer_packet)
+        self._handle_packet('handle_dhcp_ack', packet)
 
     def HandleDhcpNack(self, packet):
-        self._handle_packet('handle_dhcp_nack', offer_packet)
+        self._handle_packet('handle_dhcp_nack', packet)
 
     @property
     def socket(self):
