@@ -20,6 +20,7 @@
 
 import sys
 sys.path.append('../pydhcplib/pydhcplib')
+import logging
 import weakref
 import re
 import traceback
@@ -50,6 +51,7 @@ class OpenVpnCmdConn(CommandConnection):
         self._full_username_to_mac = full_username_to_mac_clb
         self._ret_fn = None
         self._wrote_ret = False
+        self.log = logging.getLogger('ovpncmd')
 
     def __del__(self):
         if self._ret_fn is not None and not self._wrote_ret:
@@ -57,12 +59,17 @@ class OpenVpnCmdConn(CommandConnection):
         CommandConnection.__del__(self)
 
     def _write_ret(self, val):
+        self.log.debug('writing deferred return value %d to "%s"' % (val,
+                self._ret_fn))
         ret_fp = open(self._ret_fn, 'wb')
         ret_fp.write('%d' % val);
         ret_fp.close()
         self._wrote_ret = True
 
     def _success_handler(self, res):
+        self.log.debug('DHCP request succeeded: %s' % repr(res))
+	self.log.debug('writing OpenVPN client configuration to "%s"' %
+                self._config_fn)
         conf_fp = open(self._config_fn, 'wb')
         conf_fp.write('ifconfig-push %s %s\n' % (res['ip-address'],
                 res['subnet-mask']))
@@ -78,16 +85,18 @@ class OpenVpnCmdConn(CommandConnection):
         self._write_ret(self.CC_RET_SUCCESS)
 
     def _failure_handler(self):
+        self.log.debug('DHCP request failed')
         self._write_ret(self.CC_RET_FAILURE)
 
     def handle_command(self, cmd):
+        self.log.debug('handling command "%s"' % cmd)
         try:
             params = {}
             for p in cmd.split(' '):
                 k, v = p.split('=')
                 params[k] = v
-        except IOError, e:
-            print "IOError in cmd handle"
+        except:
+            self.log.warning('failed to parse command "%s"')
             return
         try:
             self._full_username = params['full_username']
@@ -96,14 +105,16 @@ class OpenVpnCmdConn(CommandConnection):
         except KeyError, e:
             self.send_cmd('FAIL')
             self._write_ret(self.CC_RET_FAILURE)
-            print "command is missing a parameter: %s" % e.args
+            self.log.warning('command "%s" is missing a parameter: %s' % (cmd,
+                    e.args))
             return
 
         m = re.match(self.USERNAME_RE, self._full_username)
         if m is None:
             self.send_cmd('FAIL')
             self._write_ret(self.CC_RET_FAILURE)
-            print "username in unexpected format: %s" % self._full_username
+            self.log.warning('username in unexpected format: "%s"' % \
+                    self._full_username)
             return
         self._realm = m.group('realm')
         self._realm_data = self._request_realm_data(realm=self._realm)
@@ -119,7 +130,7 @@ class OpenVpnCmdConn(CommandConnection):
                     local_port=self._realm_data.dhcp_local_port,
                     server_ips=self._realm_data.dhcp_server_ips)
         except:
-            print traceback.print_exc()
+            self.log.exception('Adding a new DHCP request failed')
 
 class RealmData(object):
     pass
@@ -131,6 +142,8 @@ def main():
     (options, args) = parser.parse_args()
     if len(args) != 0:
             parser.error("incorrect number of arguments")
+
+    logging.basicConfig(level=logging.DEBUG)
 
     cfg = SafeConfigParser()
     cfg.read(options.config_file)
@@ -157,7 +170,7 @@ def main():
                     cfg.get(sect, 'dhcp_server_ips').split(',')]
             return realm_data
         else:
-            sys.stderr.write("E: Unknown realm %s.\n" % realm)
+            logger.error('Unknown realm %s.' % realm)
             return None
 
     def create_vpn_cmd_conn(sloop, socket):

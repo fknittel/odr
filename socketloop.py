@@ -20,6 +20,7 @@
 
 import select
 import traceback
+import logging
 
 class SocketLoop(object):
     def __init__(self):
@@ -27,25 +28,25 @@ class SocketLoop(object):
         self._idle_handlers = []
         self._run = True
         self.timeout = 0.5
+        self.log = logging.getLogger('socketloop')
 
     def run(self):
         while self._run:
             sockets = self._socket_handlers.keys()
             args = [sockets, [], [],
                     self.timeout]
-            print repr(args)
             ready_input_sockets, _, _ = select.select(*args)
             for ready_input_socket in ready_input_sockets:
                 socket_handler = self._socket_handlers[ready_input_socket]
                 try:
                     socket_handler.handle_socket()
                 except:
-                    print traceback.print_exc()
+                    self.log.exception('socket handler failed')
             for idle_handler in self._idle_handlers:
                 try:
                     idle_handler()
                 except:
-                    print traceback.print_exc()
+                    self.log.exception('idle handler failed')
 
     def add_socket_handler(self, socket_handler):
         self._socket_handlers[socket_handler.socket] = socket_handler

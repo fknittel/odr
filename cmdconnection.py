@@ -18,6 +18,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import logging
 import socket
 import os
 
@@ -86,11 +87,13 @@ class CommandConnectionListener(object):
         self._sloop = sloop
         self._factory = cmd_conn_factory
 
+        self.log = logging.getLogger('cmdconnlistener')
         self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._socket.setblocking(False)
         if os.path.exists(socket_path):
             os.remove(socket_path)
         # TODO: Set proper permissions
+        self.log.debug('listening on socket %s' % socket_path)
         self._socket.bind(socket_path)
         self._socket.listen(self.ACCEPT_QUEUE_LEN)
 
@@ -107,6 +110,7 @@ class CommandConnectionListener(object):
         except IOError, e:
             print "Received exception %s while accepting new cmd conn" % repr(e)
             return
+        self.log.debug('received a new connection')
         socket.setblocking(False)
         conn = self._factory(self._sloop, socket)
         self._sloop.add_socket_handler(conn)

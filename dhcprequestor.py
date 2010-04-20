@@ -25,6 +25,7 @@ from pydhcplib.type_hwmac import hwmac
 import random
 import weakref
 import time
+import logging
 
 class DhcpAddressRequest(object):
     AR_DISCOVER = 1
@@ -42,6 +43,8 @@ class DhcpAddressRequest(object):
         self._max_retries = kwargs.get("max_retries", 2)
         self._timeout = kwargs.get("timeout", 5)
 
+        self.log = logging.getLogger('dhcpaddrreq')
+
         self._xid = ipv4([random.randint(0, 255) for i in range(4)])
 
         # Packet resending and timeout.
@@ -50,12 +53,12 @@ class DhcpAddressRequest(object):
 
         self._state = self.AR_DISCOVER
 
-        print "me be created (xid: %d)" % self.xid
+        self.log.debug('xid %d created' % self.xid)
         self._requestor.add_request(self)
         self._send_packet(self._generate_discover())
 
     def __del__(self):
-        print "me be dying (xid: %d)" % self.xid
+        self.log.debug('xid %d destroyed' % self.xid)
 
     @property
     def xid(self):
@@ -94,12 +97,14 @@ class DhcpAddressRequest(object):
 
     def _retrieve_server_ip(self, packet):
         if len(self._server_ips) > 1:
-            print "Attempting to find server ip ..."
+            self.log.debug("Attempting to find server ip")
             try:
                 self._server_ips = [ipv4(packet.GetOption(
                         'server_identifier'))]
             except:
                 pass
+            else:
+                self.log.debug("Found server ip %s" % self._server_ips.str())
 
     def _send_packet(self, packet):
         self._last_packet = packet
@@ -114,15 +119,15 @@ class DhcpAddressRequest(object):
         self._timeout_time = time.time() + self._timeout
         self._timeout_mgr.add_timeout_object(self)
         for server_ip in self._server_ips:
-            print "Sending packet in state %d to %s ... [%d/%d]" % (
+            self.log.debug("Sending packet in state %d to %s [%d/%d]" % (
                     self._state, str(server_ip), self._packet_retries + 1,
-                    self._max_retries + 1)
+                    self._max_retries + 1))
             self._requestor.SendDhcpPacketTo(packet, str(server_ip), 67)
 
     def handle_dhcp_offer(self, offer_packet):
         if self._state != self.AR_DISCOVER:
             return
-        print "Received offer"
+        self.log.debug("Received offer")
         self._timeout_mgr.del_timeout_object(self)
         req_packet = self._generate_request(offer_packet)
         self._retrieve_server_ip(req_packet)
@@ -132,7 +137,7 @@ class DhcpAddressRequest(object):
     def handle_dhcp_ack(self, packet):
         if self._state != self.AR_REQUEST:
             return
-        print "Received ACK"
+        self.log.debug("Received ACK")
         self._timeout_mgr.del_timeout_object(self)
         self._requestor.del_request(self)
         result = {}
@@ -168,11 +173,11 @@ class DhcpAddressRequest(object):
         return self._timeout_time
 
     def handle_timeout(self):
-        print "handling timeout for %d" % self.xid
+        self.log.debug("handling timeout for %d" % self.xid)
         if self._packet_retries >= self._max_retries:
             self._requestor.del_request(self)
-            print "Timeout for reply to packet in state %d" % \
-                    self._state
+            self.log.debug("Timeout for reply to packet in state %d" % \
+                    self._state)
             self._failure_handler()
         elif self._last_packet is not None:
             self._resend_packet()
@@ -182,15 +187,19 @@ class DhcpAddressRequestor(DhcpClient):
         self.local_ip = kwargs["local_ip"]
         self.local_port = kwargs.get("local_port", 67)
         DhcpClient.__init__(self, self.local_ip, self.local_port, 67)
+
+        self.log = logging.getLogger('dhcpaddrrequestor')
         self.__requests = {}
         self.BindToAddress()
+        self.log.debug('listening on %s:%d for DHCP responses' % (self.local_ip,
+                self.local_port))
 
     def add_request(self, request):
-        print "adding xid %d" % request.xid
+        self.log.debug("adding xid %d" % request.xid)
         self.__requests[request.xid] = request
 
     def del_request(self, request):
-        print "deleting xid %d" % request.xid
+        self.log.debug("deleting xid %d" % request.xid)
         del self.__requests[request.xid]
 
     def check_timeouts(self):
@@ -202,7 +211,7 @@ class DhcpAddressRequestor(DhcpClient):
     def _handle_packet(self, clb_name, packet):
         xid = ipv4(packet.GetOption('xid'))
         if xid.int() not in self.__requests:
-            print "Ignoring answer with xid %s" % repr(xid.int())
+            self.log.debug("Ignoring answer with xid %s" % repr(xid.int()))
             return
 
         request = self.__requests[xid.int()]
@@ -229,15 +238,15 @@ class DhcpAddressRequestorManager(object):
     def __init__(self, request_factory):
         self._requestors_by_ip = {}
         self._request_factory = request_factory
+        self.log = logging.getLogger('dhcpaddrrequestormgr')
 
     def add_requestor(self, requestor):
         self._requestors_by_ip[requestor.local_ip] = requestor
 
     def add_request(self, local_ip, **kwargs):
-        print repr(self._requestors_by_ip)
-        print repr(local_ip)
         if not local_ip in self._requestors_by_ip:
-            raise RuntimeError('request for unsupported local IP %s' % local_ip)
+            self.log.error('request for unsupported local IP %s' % local_ip)
+            return
         requestor = self._requestors_by_ip[local_ip]
         request = self._request_factory(requestor=weakref.proxy(requestor),
                 local_ip=local_ip, **kwargs)
