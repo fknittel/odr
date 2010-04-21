@@ -18,12 +18,20 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import with_statement 
+
 import sys
-sys.path.append('../pydhcplib/pydhcplib')
+sys.path.append('/opt/pydhcplib')
 import logging
+import logging.config
 import weakref
 import re
 import traceback
+import os
+import grp
+import daemon
+import lockfile
+import signal
 from optparse import OptionParser
 from ConfigParser import SafeConfigParser
 
@@ -139,16 +147,39 @@ def main():
     parser = OptionParser()
     parser.add_option("-c", "--config", dest="config_file",
             help="Configuration file", default=CONFIG_FILE)
+    parser.add_option("--debug", dest="debug", action="store_true",
+            help="Activate debug logging", default=False)
+    parser.add_option("--foreground", dest="foreground", action="store_true",
+            help="Do not detach to background", default=False)
     (options, args) = parser.parse_args()
     if len(args) != 0:
             parser.error("incorrect number of arguments")
 
-    logging.basicConfig(level=logging.DEBUG)
-
     cfg = SafeConfigParser()
     cfg.read(options.config_file)
 
+    logging.config.fileConfig(options.config_file)
+    log = logging.getLogger('ovpndhcprequestord')
+    if options.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    context = daemon.DaemonContext(
+        working_directory='/var/lib/ovpn-dhcp-requestord',
+        umask=002,
+        pidfile=lockfile.FileLock('/var/run/ovpn-dhcp-requestord.pid'),
+        detach_process=(not options.foreground),
+    )
+
     sloop = SocketLoop()
+
+    def exit_daemon():
+        logging.notice('exiting on signal')
+        sloop.quit
+
+    context.signal_map = {
+        signal.SIGTERM:exit_daemon,
+    }
+
     timeout_mgr = TimeoutManager()
     sloop.add_idle_handler(timeout_mgr)
 
@@ -191,7 +222,18 @@ def main():
         sloop.add_socket_handler(requestor)
         requestor_mgr.add_requestor(requestor)
 
-    sloop.run()
+    context.files_preserve = sloop.sockets
+    # XXX: Using protected attribute.
+    for handler in logging._handlerList:
+        # XXX: There's no proper interface for the open sockets/fds.
+        if hasattr(handler, 'socket'):
+            context.files_preserve.append(handler.socket)
+        elif hasattr(handler, 'sock'):
+            context.files_preserve.append(handler.sock)
+        elif hasattr(handler, 'stream'):
+            context.files_preserve.append(handler.stream)
+    with context:
+        sloop.run()
 
 if __name__ == '__main__':
     main()

@@ -32,9 +32,7 @@ class SocketLoop(object):
 
     def run(self):
         while self._run:
-            sockets = self._socket_handlers.keys()
-            args = [sockets, [], [],
-                    self.timeout]
+            args = [self.sockets, [], [], self.timeout]
             ready_input_sockets, _, _ = select.select(*args)
             for ready_input_socket in ready_input_sockets:
                 socket_handler = self._socket_handlers[ready_input_socket]
@@ -56,6 +54,10 @@ class SocketLoop(object):
 
     def add_idle_handler(self, idle_handler):
         self._idle_handlers.append(idle_handler)
+
+    @property
+    def sockets(self):
+        return self._socket_handlers.keys()
 
     def quit(self):
         self._run = True
