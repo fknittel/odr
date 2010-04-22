@@ -3,7 +3,7 @@
 
 # dhcprequestor.py -- Requests an IP address on behalf of a given MAC address.
 #
-# Copyright (C) 2010 Fabian Knittel <fabian.knittel@avona.com>
+# Copyright © 2010 Fabian Knittel <fabian.knittel@avona.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,15 +18,19 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from pydhcplib.dhcp_packet import DhcpPacket
-from pydhcplib.dhcp_network import DhcpClient
-from pydhcplib.type_ipv4 import ipv4
-from pydhcplib.type_hwmac import hwmac
 import random
 import weakref
 import time
 import logging
+import socket
+import errno
 
+from pydhcplib.dhcp_packet import DhcpPacket
+from pydhcplib.dhcp_network import DhcpClient
+from pydhcplib.type_ipv4 import ipv4
+from pydhcplib.type_hwmac import hwmac
+
+
 class DhcpAddressRequest(object):
     AR_DISCOVER = 1
     AR_REQUEST = 2
@@ -182,17 +186,38 @@ class DhcpAddressRequest(object):
         elif self._last_packet is not None:
             self._resend_packet()
 
+
+class DhcpLocalAddressBindFailed(Exception):
+    """For some reason, the requested local address / port combination could not
+    be bound to.
+    """
+
+class DhcpLocalAddressNotAvailable(DhcpLocalAddressBindFailed):
+    """The requested local address / port combination was not available.
+    """
+
+
 class DhcpAddressRequestor(DhcpClient):
     def __init__(self, **kwargs):
-        self.local_ip = kwargs["local_ip"]
-        self.local_port = kwargs.get("local_port", 67)
-        DhcpClient.__init__(self, self.local_ip, self.local_port, 67)
+        DhcpClient.__init__(self, kwargs["local_ip"],
+                kwargs.get("local_port", 67), 67)
 
         self.log = logging.getLogger('dhcpaddrrequestor')
         self.__requests = {}
-        self.BindToAddress()
-        self.log.debug('listening on %s:%d for DHCP responses' % (self.local_ip,
-                self.local_port))
+
+        try :
+            self.dhcp_socket.bind((self.listen_address, self.listen_port))
+        except socket.error, msg:
+            err = msg.args[0]
+            if err == errno.EADDRNOTAVAIL:
+                raise DhcpLocalAddressNotAvailable(
+                        self.listen_address, self.listen_port)
+            else:
+                raise DhcpLocalAddressBindFailed(
+                        self.listen_address, self.listen_port, msg)
+
+        self.log.debug('listening on %s:%d for DHCP responses' % (
+                self.listen_address, self.listen_port))
 
     def add_request(self, request):
         self.log.debug("adding xid %d" % request.xid)
