@@ -167,7 +167,6 @@ def main():
         working_directory=cfg.get('daemon', 'working_dir'),
         umask=002,
         pidfile=lockfile.FileLock(cfg.get('daemon', 'pid_file')),
-        detach_process=(not options.foreground),
     )
 
     sloop = SocketLoop()
@@ -236,7 +235,11 @@ def main():
             context.files_preserve.append(handler.sock)
         elif hasattr(handler, 'stream'):
             context.files_preserve.append(handler.stream)
-    with context:
+
+    if not options.foreground:
+        with context:
+             sloop.run()
+    else:
         sloop.run()
 
 if __name__ == '__main__':
