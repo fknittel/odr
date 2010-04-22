@@ -199,7 +199,7 @@ def main():
                     cfg.get(sect, 'dhcp_server_ips').split(',')]
             return realm_data
         else:
-            logger.error('Unknown realm %s.' % realm)
+            logging.error('Unknown realm %s.' % realm)
             return None
 
     def create_vpn_cmd_conn(sloop, socket):
