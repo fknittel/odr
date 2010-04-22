@@ -1,9 +1,10 @@
 #!/usr/bin/python
 # vim:set encoding=utf-8 ft=python ts=8 sw=4 sts=4 et cindent:
 
-# cmdconnection.py
+# cmdconnection.py -- Module for simple line-based client-server communication
+#         via UNIX domain sockets.
 #
-# Copyright (C) 2010 Fabian Knittel <fabian.knittel@avona.com>
+# Copyright © 2010 Fabian Knittel <fabian.knittel@avona.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,8 +23,15 @@ import logging
 import socket
 import os
 
+
 class LineSocket(object):
+    """The LineSocket class wraps around a regular socket object.  Instead of
+    byte blobs, the class allows lines to be received.
+    """
+
     def __init__(self, socket):
+        """@param socket: The socket that is used to receive the line data from.
+        """
         self._socket = socket
         self._in_buf = ''
 
@@ -31,10 +39,18 @@ class LineSocket(object):
         self.close()
 
     def close(self):
+        """Close the underlying socket.  Further access to the socket is not
+        allowed.
+        """
         self._socket.close()
 
     def recv_lines(self):
-        """@return: Returns None in case of EOF, otherwise a list of lines.
+        """Receives data from the socket.  The received data is buffered until a
+        complete line can be retrieved.  Each call of this method will return
+        the next completed line.
+
+        @return: Returns None in case of EOF, otherwise the next completed
+        line.
         """
         new_data = self._socket.recv(1024)
         self._in_buf += new_data
@@ -46,13 +62,31 @@ class LineSocket(object):
         return lines
 
     def send(self, msg):
+        """Sends data via the underlying socket.
+        @param msg: The byte string to send via the socket.
+        """
         self._socket.send(msg)
 
     def fileno(self):
+        """@return: Returns the file descriptor number of the underlying socket.
+        """
         return self._socket.fileno()
 
+
 class CommandConnection(object):
+    """Represents the connection to a single client.  The class should be used
+    as a base-class.  Sub-classes will implement the stub methods to provide the
+    actual functionality.
+
+    The communication is line based.  Each command is on a single line and ends
+    with a new-line character.
+    """
+
     def __init__(self, sloop, socket):
+        """\
+        @param sloop: Instance of the socket loop.
+        @param socket: Socket that will be used for communication.
+        """
         self._sloop = sloop
         self._socket = LineSocket(socket)
 
@@ -61,9 +95,19 @@ class CommandConnection(object):
 
     @property
     def socket(self):
+        """@return: Returns the underlying socket.
+        """
         return self._socket
 
     def handle_socket(self):
+        """Part of the interface expected by the socket loop.  Should be called
+        as soon as the socket has data waiting to be read.  The method will
+        process any pending data and call the sub-classes command-handler
+        method in case a complete command was received.
+
+        In case of EOF, the socket will be removed from the socket loop and this
+        instance will get destroyed.
+        """
         cmds = self._socket.recv_lines()
         if cmds is not None:
             for cmd in cmds:
@@ -72,19 +116,41 @@ class CommandConnection(object):
             self._sloop.del_socket_handler(self)
 
     def send_cmd(self, cmd):
+        """Used to send responses back to the client.  Sends the specified
+        command as a single-line.
+
+        @param cmd: Command to send. Should not contain a new-line.
+        """
         self._socket.send(cmd + '\n')
 
     def handle_command(self,  cmd):
         """The handle_command function is called as soon as a command was
         received and parsed by CommandConnection.  A sub-class should implement
-        the stub function and process the command.
+        the stub function and do the actual command processing.
         """
 
+
 class CommandConnectionListener(object):
+    """Listens on a POSIX Local IPC Socket (AKA Unix domain socket) and uses a
+    factory function to create an instance that takes care of each new socket
+    connection.
+    """
+
     ACCEPT_QUEUE_LEN = 32
 
     def __init__(self, sloop, cmd_conn_factory, socket_path,
                 socket_perm_mode=0600):
+        """Opens the POSIX Local IPC Socket.  If the file already exists, it
+        is deleted first.  The file permissions are set according to the
+        socket_perm_mode parameter.
+
+        @param sloop: Instance of the socket loop.
+        @param cmd_conn_factory: Factory method that gets called with the
+                socket loop instance and the new socket for each new connection.
+        @param socket_path: Path to the POSIX Local IPC Socket.
+        @param socket_perm_mode: File access permissions to be set for the
+                file socket.
+        """
         self._sloop = sloop
         self._factory = cmd_conn_factory
 
@@ -103,9 +169,16 @@ class CommandConnectionListener(object):
 
     @property
     def socket(self):
+        """@return: Returns the listening socket.
+        """
         return self._socket
 
     def handle_socket(self):
+        """Part of the interface expected by the socket loop.  Should be called
+        as soon as the socket has a new connection waiting.  Uses the factory
+        method passed in at creation time to create a new handler instance for
+        each socket.
+        """
         try:
             socket, _ = self._socket.accept()
         except IOError, e:
