@@ -83,7 +83,8 @@ class CommandConnection(object):
 class CommandConnectionListener(object):
     ACCEPT_QUEUE_LEN = 32
 
-    def __init__(self, sloop, socket_path, cmd_conn_factory):
+    def __init__(self, sloop, cmd_conn_factory, socket_path,
+                socket_perm_mode=0600):
         self._sloop = sloop
         self._factory = cmd_conn_factory
 
@@ -92,9 +93,9 @@ class CommandConnectionListener(object):
         self._socket.setblocking(False)
         if os.path.exists(socket_path):
             os.remove(socket_path)
-        # TODO: Set proper permissions
         self.log.debug('listening on socket %s' % socket_path)
         self._socket.bind(socket_path)
+        os.chmod(socket_path, socket_perm_mode)
         self._socket.listen(self.ACCEPT_QUEUE_LEN)
 
     def __del__(self):

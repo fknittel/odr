@@ -164,9 +164,9 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
 
     context = daemon.DaemonContext(
-        working_directory='/var/lib/ovpn-dhcp-requestord',
+        working_directory=cfg.get('daemon', 'working_dir'),
         umask=002,
-        pidfile=lockfile.FileLock('/var/run/ovpn-dhcp-requestord.pid'),
+        pidfile=lockfile.FileLock(cfg.get('daemon', 'pid_file')),
         detach_process=(not options.foreground),
     )
 
@@ -210,10 +210,13 @@ def main():
                 add_request_clb=requestor_mgr.add_request,
                 full_username_to_mac_clb=machasher.hash_login_to_mac)
 
+    cmd_socket_perms = int(cfg.get('daemon', 'cmd_socket_perms'), 8)
     for unix_socket_fn in [u.strip() for u in \
-            cfg.get('commands', 'sockets').split(',')]:
-        cmd_listener = CommandConnectionListener(weakref.proxy(sloop),
-                unix_socket_fn, create_vpn_cmd_conn)
+            cfg.get('daemon', 'cmd_sockets').split(',')]:
+        cmd_listener = CommandConnectionListener(sloop=weakref.proxy(sloop),
+                socket_path=unix_socket_fn,
+                cmd_conn_factory=create_vpn_cmd_conn,
+                socket_perm_mode=cmd_socket_perms)
         sloop.add_socket_handler(cmd_listener)
 
     for realm_section in [s for s in cfg.sections() if s.startswith('realm ')]:
