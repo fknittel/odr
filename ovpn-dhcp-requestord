@@ -217,8 +217,9 @@ def main():
         sloop.add_socket_handler(cmd_listener)
 
     for realm_section in [s for s in cfg.sections() if s.startswith('realm ')]:
-        dhcp_listening_ip = cfg.get(realm_section, 'dhcp_listening_ip')
-        requestor = DhcpAddressRequestor(local_ip=dhcp_listening_ip)
+        requestor = DhcpAddressRequestor(
+                local_ip=cfg.get(realm_section, 'dhcp_listening_ip'),
+                local_port=cfg.getint(sect, 'dhcp_local_port'))
         sloop.add_socket_handler(requestor)
         requestor_mgr.add_requestor(requestor)
 
