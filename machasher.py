@@ -1,10 +1,9 @@
 #!/usr/bin/python
-# -*- coding: utf-8 -*-
-# vim:set ts=8 sw=4 et:
+# vim:set encoding=utf-8 ft=python ts=8 sw=4 sts=4 et cindent:
 
-# machasher.py
+# machasher.py -- Generates a MAC address based on an arbitrary string
 #
-# Copyright (C) 2010 Fabian Knittel <fabian.knittel@avona.com>
+# Copyright © 2010 Fabian Knittel <fabian.knittel@avona.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -23,6 +22,13 @@ import hashlib
 import sys
 
 def hash_login_to_mac(login):
+    """Uses an arbitrary string to generate a hopefully unique MAC address.  The
+    string will typically be a login string.
+
+    The MAC address is marked as a local unicast address.
+
+    @param login: The string that will be used as basis for the MAC address.
+    """
     # Use a regular secure hash as basis.
     h = hashlib.sha1()
     h.update(login)

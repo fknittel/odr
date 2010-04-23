@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # vim:set encoding=utf-8 ft=python ts=8 sw=4 sts=4 et cindent:
 
 # cmdconnection.py -- Module for simple line-based client-server communication
