@@ -21,6 +21,7 @@ import select
 import traceback
 import logging
 
+
 class SocketLoop(object):
     """Maintains a list of socket handlers.  Each handler may have a single
     socket.  Waits for activity on all known sockets and in case of activity for

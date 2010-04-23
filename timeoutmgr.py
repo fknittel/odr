@@ -20,6 +20,7 @@
 import time
 import logging
 
+
 class TimeoutManager(object):
     """The TimeoutManager keeps track of objects that have a timeout time set.
     As soon as a timeout occurs, the affected objects are notified.
