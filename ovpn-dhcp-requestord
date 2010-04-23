@@ -241,11 +241,15 @@ def main():
         elif hasattr(handler, 'stream'):
             context.files_preserve.append(handler.stream)
 
-    if not options.foreground:
-        with context:
-             sloop.run()
-    else:
-        sloop.run()
+    try:
+        if not options.foreground:
+            with context:
+                 sloop.run()
+        else:
+            sloop.run()
+    except:
+        logging.exception('Caught exception in main loop')
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
