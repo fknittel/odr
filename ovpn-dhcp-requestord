@@ -221,8 +221,8 @@ def main():
         for realm_section in [s for s in cfg.sections()
                 if s.startswith('realm ')]:
             requestor = dhcprequestor.DhcpAddressRequestor(
-                    local_ip=cfg.get(realm_section, 'dhcp_listening_ip'),
-                    local_port=cfg.getint(realm_section, 'dhcp_local_port'))
+                    listen_address=cfg.get(realm_section, 'dhcp_listening_ip'),
+                    listen_port=cfg.getint(realm_section, 'dhcp_local_port'))
             sloop.add_socket_handler(requestor)
             requestor_mgr.add_requestor(requestor)
     except dhcprequestor.DhcpLocalAddressBindFailed, ex:

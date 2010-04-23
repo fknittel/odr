@@ -199,8 +199,8 @@ class DhcpLocalAddressNotAvailable(DhcpLocalAddressBindFailed):
 
 class DhcpAddressRequestor(DhcpClient):
     def __init__(self, **kwargs):
-        DhcpClient.__init__(self, kwargs["local_ip"],
-                kwargs.get("local_port", 67), 67)
+        DhcpClient.__init__(self, kwargs["listen_address"],
+                kwargs.get("listen_port", 67), 67)
 
         self.log = logging.getLogger('dhcpaddrrequestor')
         self.__requests = {}
@@ -266,7 +266,11 @@ class DhcpAddressRequestorManager(object):
         self.log = logging.getLogger('dhcpaddrrequestormgr')
 
     def add_requestor(self, requestor):
-        self._requestors_by_ip[requestor.local_ip] = requestor
+        if requestor.listen_address in self._requestors_by_ip:
+            self.log.error('attempt to listen on IP %s multiple times' % \
+                    requestor.listen_address)
+            return
+        self._requestors_by_ip[requestor.listen_address] = requestor
 
     def add_request(self, local_ip, **kwargs):
         if not local_ip in self._requestors_by_ip:
