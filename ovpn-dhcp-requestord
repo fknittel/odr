@@ -30,7 +30,7 @@ import traceback
 import os
 import grp
 import daemon
-import lockfile
+import daemon.pidlockfile
 import signal
 from optparse import OptionParser
 from ConfigParser import SafeConfigParser
@@ -165,7 +165,8 @@ def main():
     context = daemon.DaemonContext(
         working_directory=cfg.get('daemon', 'working_dir'),
         umask=002,
-        pidfile=lockfile.FileLock(cfg.get('daemon', 'pid_file')),
+        pidfile=daemon.pidlockfile.TimeoutPIDLockFile(
+                cfg.get('daemon', 'pid_file')),
     )
 
     sloop = SocketLoop()
