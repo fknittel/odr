@@ -86,4 +86,4 @@ class SocketLoop(object):
         """Request that the select loop be exited soon.  Sets a flag that will
         be checked for in the select loop.
         """
-        self._run = True
+        self._run = False
