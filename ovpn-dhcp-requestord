@@ -139,6 +139,23 @@ class OpenVpnCmdConn(CommandConnection):
 class RealmData(object):
     pass
 
+def read_realms(cfg):
+    realms = {}
+    for sect in [s for s in cfg.sections() if s.startswith('realm ')]:
+        realm_name = sect[len('realm '):]
+        realm_data = RealmData()
+        realm_data.dhcp_local_port = cfg.getint(sect, 'dhcp_local_port')
+        realm_data.vid = cfg.getint(sect, 'vid')
+        realm_data.dhcp_listening_device = \
+                cfg.get(sect, 'dhcp_listening_device')
+        realm_data.dhcp_listening_ip = cfg.get(sect, 'dhcp_listening_ip')
+        realm_data.dhcp_server_ips = [i.strip() for i in \
+                cfg.get(sect, 'dhcp_server_ips').split(',')]
+        realm_data.expected_dhcp_lease_time = \
+                cfg.getint(sect, 'expected_dhcp_lease_time')
+        realms[realm_name] = realm_data
+    return realms
+
 def main():
     parser = OptionParser()
     parser.add_option("-c", "--config", dest="config_file",
@@ -158,6 +175,8 @@ def main():
     log = logging.getLogger('ovpndhcprequestord')
     if options.debug:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    realms = read_realms(cfg)
 
     context = daemon.DaemonContext(
         working_directory=cfg.get('daemon', 'working_dir'),
@@ -187,19 +206,8 @@ def main():
             request_factory=create_dhcp_address_request)
 
     def get_realm_data(realm):
-        sect = 'realm %s' % realm
-        if cfg.has_section(sect):
-            realm_data = RealmData()
-            realm_data.dhcp_local_port = cfg.getint(sect, 'dhcp_local_port')
-            realm_data.vid = cfg.getint(sect, 'vid')
-            realm_data.dhcp_listening_device = \
-                    cfg.get(sect, 'dhcp_listening_device')
-            realm_data.dhcp_listening_ip = cfg.get(sect, 'dhcp_listening_ip')
-            realm_data.dhcp_server_ips = [i.strip() for i in \
-                    cfg.get(sect, 'dhcp_server_ips').split(',')]
-            realm_data.expected_dhcp_lease_time = \
-                    cfg.getint(sect, 'expected_dhcp_lease_time')
-            return realm_data
+        if realm in realms:
+            return realms[realm]
         else:
             logging.error('Unknown realm %s.' % realm)
             return None
@@ -220,13 +228,11 @@ def main():
         sloop.add_socket_handler(cmd_listener)
 
     try:
-        for realm_section in [s for s in cfg.sections()
-                if s.startswith('realm ')]:
+        for realm in realms.values():
             requestor = dhcprequestor.DhcpAddressRequestor(
-                    listen_address=cfg.get(realm_section, 'dhcp_listening_ip'),
-                    listen_port=cfg.getint(realm_section, 'dhcp_local_port'),
-                    listen_device=cfg.get(realm_section,
-                            'dhcp_listening_device'))
+                    listen_address=realm.dhcp_listening_ip,
+                    listen_port=realm.dhcp_local_port,
+                    listen_device=realm.dhcp_listening_device)
             sloop.add_socket_handler(requestor)
             requestor_mgr.add_requestor(requestor)
     except dhcprequestor.DhcpLocalAddressBindFailed, ex:
