@@ -50,10 +50,10 @@ class OpenVpnCmdConn(CommandConnection):
 
     USERNAME_RE = r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?@(?P<domain>[^/@]+)(/(?P<realm>[^/@]+))?$'
 
-    def __init__(self, sloop, socket, request_realm_data_clb, add_request_clb,
+    def __init__(self, sloop, socket, realms_data, add_request_clb,
             full_username_to_mac_clb):
         super(OpenVpnCmdConn, self).__init__(sloop, socket)
-        self._request_realm_data = request_realm_data_clb
+        self._realms_data = realms_data
         self._add_request = add_request_clb
         self._full_username_to_mac = full_username_to_mac_clb
         self._ret_fn = None
@@ -120,7 +120,13 @@ class OpenVpnCmdConn(CommandConnection):
                     self._full_username)
             return
         self._realm = m.group('realm')
-        self._realm_data = self._request_realm_data(realm=self._realm)
+
+        if self._realm not in self._realms_data:
+            self.send_cmd('FAIL')
+            logging.error('Unknown realm %s.' % self._realm)
+            return
+        self._realm_data = self._realms_data[self._realm]
+ 
         self.send_cmd('OK')
 
         self._mac_addr = self._full_username_to_mac(self._full_username)
@@ -176,7 +182,7 @@ def main():
     if options.debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    realms = read_realms(cfg)
+    realms_data = read_realms(cfg)
 
     context = daemon.DaemonContext(
         working_directory=cfg.get('daemon', 'working_dir'),
@@ -205,16 +211,9 @@ def main():
     requestor_mgr = dhcprequestor.DhcpAddressRequestorManager(
             request_factory=create_dhcp_address_request)
 
-    def get_realm_data(realm):
-        if realm in realms:
-            return realms[realm]
-        else:
-            logging.error('Unknown realm %s.' % realm)
-            return None
-
     def create_vpn_cmd_conn(sloop, socket):
         return OpenVpnCmdConn(sloop, socket,
-                request_realm_data_clb=get_realm_data,
+                realms_data=realms_data,
                 add_request_clb=requestor_mgr.add_request,
                 full_username_to_mac_clb=machasher.hash_login_to_mac)
 
@@ -228,11 +227,11 @@ def main():
         sloop.add_socket_handler(cmd_listener)
 
     try:
-        for realm in realms.values():
+        for realm_data in realms_data.values():
             requestor = dhcprequestor.DhcpAddressRequestor(
-                    listen_address=realm.dhcp_listening_ip,
-                    listen_port=realm.dhcp_local_port,
-                    listen_device=realm.dhcp_listening_device)
+                    listen_address=realm_data.dhcp_listening_ip,
+                    listen_port=realm_data.dhcp_local_port,
+                    listen_device=realm_data.dhcp_listening_device)
             sloop.add_socket_handler(requestor)
             requestor_mgr.add_requestor(requestor)
     except dhcprequestor.DhcpLocalAddressBindFailed, ex:
