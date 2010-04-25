@@ -48,8 +48,8 @@ s.connect('/tmp/bla.sock')
 write_ret(ret_fn, 3)
 
 try:
-    s.send('full_username=%s ret_file_name=%s config_file_name=%s\n' % (
-            full_username, ret_fn, cfg_fn))
+    s.send(cmdconnection.pack_cmd('request', {'full_username':full_username,
+            'ret_file_name':ret_fn, 'config_file_name':cfg_fn}) + '\n')
     ret = s.recv(1024)
     print 'Received: %s' % ret
     if ret != 'OK\n':

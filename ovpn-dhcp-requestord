@@ -95,16 +95,7 @@ class OpenVpnCmdConn(CommandConnection):
         self.log.debug('DHCP request failed')
         self._write_ret(self.CC_RET_FAILURE)
 
-    def handle_command(self, cmd):
-        self.log.debug('handling command "%s"' % cmd)
-        try:
-            params = {}
-            for p in cmd.split(' '):
-                k, v = p.split('=')
-                params[k] = v
-        except:
-            self.log.warning('failed to parse command "%s"')
-            return
+    def handle_cmd(self, cmd, params):
         try:
             self._full_username = params['full_username']
             self._ret_fn = params['ret_file_name']

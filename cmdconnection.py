@@ -72,6 +72,33 @@ class LineSocket(object):
         return self._socket.fileno()
 
 
+def unpack_cmd(cmd_line):
+    """Parse the command line and return the parsed data or None.
+    @param cmd_line: Single-line command.
+    @return: Returns a tuple of command name and parameter dictionary.
+    """
+    try:
+        params = {}
+        l = cmd_line.split('\0')
+        cmd = l.pop(0)
+        for p in l:
+            k, v = p.split('=')
+            params[k] = v
+    except:
+        return None, {}
+    return (cmd, params)
+
+def pack_cmd(cmd, params):
+    """Packs a command name and a dictionary of parameters into a command line.
+    @param cmd: The command name.
+    @param params: A dictionary of parameters.
+    @return: Returns the command line.
+    """
+    for e in [cmd] + params.keys() + params.values():
+        if ('\n' in e) or ('\0' in e):
+            raise ValueError('attempted to pack invalid command or parameters')
+    return '\0'.join([cmd] + ['%s=%s' % i for i in params.iteritems()])
+
 class CommandConnection(object):
     """Represents the connection to a single client.  The class should be used
     as a base-class.  Sub-classes will implement the stub methods to provide the
@@ -98,29 +125,46 @@ class CommandConnection(object):
         """
         return self._socket
 
+    def _parse_command(self, cmd_line):
+        """Splits the command-line and hands off the parsed data to the
+        child class' handle_cmd method.
+        @param cmd_line: The command line string to parse.
+        """
+        self.log.debug('parsing command "%s"' % cmd_line)
+        cmd, params = unpack_cmd(cmd_line)
+        if cmd is None:
+            self.log.warning('failed to parse command "%s"' % cmd_line)
+            return
+        self.handle_cmd(cmd, params)
+
+
     def handle_socket(self):
         """Part of the interface expected by the socket loop.  Should be called
         as soon as the socket has data waiting to be read.  The method will
-        process any pending data and call the sub-classes command-handler
-        method in case a complete command was received.
+        process any pending data and parse the commands of full received
+        command lines.
 
         In case of EOF, the socket will be removed from the socket loop and this
         instance will get destroyed.
         """
-        cmds = self._socket.recv_lines()
-        if cmds is not None:
-            for cmd in cmds:
-                self.handle_command(cmd)
+        cmd_lines = self._socket.recv_lines()
+        if cmd_lines is not None:
+            for cmd_line in cmd_lines:
+                self._parse_command(cmd_line)
         else:
+            self.log.debug('closing cmd socket due to EOF')
             self._sloop.del_socket_handler(self)
 
-    def send_cmd(self, cmd):
+    def send_cmd(self, cmd, params={}):
         """Used to send responses back to the client.  Sends the specified
         command as a single-line.
 
-        @param cmd: Command to send. Should not contain a new-line.
+        @param cmd: Command to send. Should not contain a new-line or a zero
+                character.
+        @param params: Parameters to send. Should not contain a new-line or a
+                zero character.
         """
-        self._socket.send(cmd + '\n')
+        self._socket.send(pack_cmd(cmd, params) + '\n')
 
     def handle_command(self,  cmd):
         """The handle_command function is called as soon as a command was
