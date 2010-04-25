@@ -22,10 +22,10 @@ import weakref
 import time
 import logging
 import socket
+import IN
 import errno
 
 from pydhcplib.dhcp_packet import DhcpPacket
-from pydhcplib.dhcp_network import DhcpClient
 from pydhcplib.type_ipv4 import ipv4
 from pydhcplib.type_hwmac import hwmac
 
@@ -177,7 +177,7 @@ class DhcpAddressRequest(object):
             self.log.debug("Sending packet in state %d to %s [%d/%d]" % (
                     self._state, str(server_ip), self._packet_retries + 1,
                     self._max_retries + 1))
-            self._requestor.SendDhcpPacketTo(packet, str(server_ip), 67)
+            self._requestor.send_packet(packet, str(server_ip), 67)
 
     def handle_dhcp_offer(self, offer_packet):
         """Called by the requestor as soon as a DHCP OFFER packet is received
@@ -287,42 +287,62 @@ class DhcpLocalAddressNotAvailable(DhcpLocalAddressBindFailed):
     """
 
 
-class DhcpAddressRequestor(DhcpClient):
+class DhcpAddressRequestor(object):
     """A DhcpAddressRequestor instance represents a UDP socket listening for
-    DHCP responses on a specific IP address and port.
+    DHCP responses on a specific IP address and port on a specific network
+    device.
 
     Specific requests are added to a requestor instance and use the requestor
     to send DHCP requests.  The requestor maps DHCP responses back to a specific
     request via the request's XID.
 
-    Provides attribute listen_address and add_request method for use by the
-    requestor manager.
+    Provides attribute listen_device, listen_address and add_request method for
+    use by the requestor manager.
 
     Provides socket and handle_socket for use by the socket loop.
     """
-    def __init__(self, listen_address, listen_port=67):
+
+    # Maps dhcp_message_type to a request's message type handler.
+    _DHCP_TYPE_HANDLERS = {
+        2:'handle_dhcp_offer',
+        5:'handle_dhcp_ack',
+        6:'handle_dhcp_nack',
+    }
+
+    def __init__(self, listen_address='', listen_port=67, listen_device=None):
         """\
         @param listen_address: IP address as string to listen on.
         @param listen_port: Local DHCP listening port. Defaults to 67.
+        @param listen_device: Device name to bind to.
         """
-        DhcpClient.__init__(self, listen_address, listen_port, 67)
+        self.listen_address = listen_address
+        self.listen_device = listen_device
+        self.listen_port = listen_port
 
         self.log = logging.getLogger('dhcpaddrrequestor')
-        self.__requests = {}
+        self._requests = {}
+
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if self.listen_device is not None:
+            self._socket.setsockopt(socket.SOL_SOCKET, IN.SO_BINDTODEVICE,
+                    self.listen_device + '\0')
 
         try :
-            self.dhcp_socket.bind((self.listen_address, self.listen_port))
+            self._socket.bind((self.listen_address, self.listen_port))
         except socket.error, msg:
             err = msg.args[0]
             if err == errno.EADDRNOTAVAIL:
                 raise DhcpLocalAddressNotAvailable(
-                        self.listen_address, self.listen_port)
+                        self.listen_address, self.listen_port,
+                        self.listen_device)
             else:
                 raise DhcpLocalAddressBindFailed(
-                        self.listen_address, self.listen_port, msg)
+                        self.listen_address, self.listen_port,
+                        self.listen_device, msg)
 
-        self.log.debug('listening on %s:%d for DHCP responses' % (
-                self.listen_address, self.listen_port))
+        self.log.debug('listening on %s:%d@%s for DHCP responses' % (
+                self.listen_address, self.listen_port, self.listen_device))
 
     def add_request(self, request):
         """Adds a new DHCP address request to this requestor.
@@ -330,7 +350,7 @@ class DhcpAddressRequestor(DhcpClient):
         @param request: The request that should be added.
         """
         self.log.debug("adding xid %d" % request.xid)
-        self.__requests[request.xid] = request
+        self._requests[request.xid] = request
 
     def del_request(self, request):
         """Removes a DHCP address request that was previously added.
@@ -338,51 +358,55 @@ class DhcpAddressRequestor(DhcpClient):
         @param request: The request that should be removed.
         """
         self.log.debug("deleting xid %d" % request.xid)
-        del self.__requests[request.xid]
+        del self._requests[request.xid]
 
-    def _handle_packet(self, clb_name, packet):
-        """Helper method that maps the events to the matching request.
-
-        @param clb_name: Name of the method used to handle this type o f event.
-        @param packet: Instance of the received packet.
-        """
-        xid = ipv4(packet.GetOption('xid'))
-        if xid.int() not in self.__requests:
-            self.log.debug("Ignoring answer with xid %s" % repr(xid.int()))
-            return
-
-        request = self.__requests[xid.int()]
-        clb = getattr(request, clb_name)
-        clb(packet)
-
-    def HandleDhcpOffer(self, packet):
-        """Called by GetNextDhcpPacket in case a DHCP OFFER packet was received.
-        Passes on the event to the actual requestor.
-        """
-        self._handle_packet('handle_dhcp_offer', packet)
-
-    def HandleDhcpAck(self, packet):
-        """Called by GetNextDhcpPacket in case a DHCP ACK packet was received.
-        Passes on the event to the actual requestor.
-        """
-        self._handle_packet('handle_dhcp_ack', packet)
-
-    def HandleDhcpNack(self, packet):
-        """Called by GetNextDhcpPacket in case a DHCP NACK packet was received.
-        Passes on the event to the actual requestor.
-        """
-        self._handle_packet('handle_dhcp_nack', packet)
 
     @property
     def socket(self):
         """@return: Returns the listening socket.
         """
-        return self.dhcp_socket
+        return self._socket
 
     def handle_socket(self):
-        """Retrieves the next, waiting DHCP packet.
+        """Retrieves the next, waiting DHCP packet, parses it and calls the
+        handler of the associated request.
         """
-        self.GetNextDhcpPacket(timeout = 0)
+        data, source_address = self._socket.recvfrom(2048)
+        if len(data) == 0:
+            self.log.warning("unexpectedly received EOF!")
+            return
+        packet = DhcpPacket()
+        packet.source_address = source_address
+        packet.DecodePacket(data)
+
+        if (not packet.IsDhcpPacket()) or \
+                (not packet.IsOption("dhcp_message_type")):
+            self.log.debug("Ignoring invalid packet")
+            return
+
+        dhcp_type = packet.GetOption("dhcp_message_type")[0]
+        if dhcp_type not in self._DHCP_TYPE_HANDLERS:
+            self.log.debug("Ignoring packet of unexpected DHCP type %d" % \
+                    dhcp_type)
+            return
+                        
+        xid = ipv4(packet.GetOption('xid'))
+        if xid.int() not in self._requests:
+            self.log.debug("Ignoring answer with xid %s" % repr(xid.int()))
+            return
+
+        request = self._requests[xid.int()]
+        clb_name = self._DHCP_TYPE_HANDLERS[dhcp_type]
+        if not hasattr(request, clb_name):
+            self.log.error("request has no callback '%s'" % clb_name)
+            return
+
+        clb = getattr(request, clb_name)
+        clb(packet)
+
+    def send_packet(self, packet, dest_ip, dest_port):
+        data = packet.EncodePacket()
+        self._socket.sendto(data, (dest_ip, dest_port))
 
 
 class DhcpAddressRequestorManager(object):
@@ -396,7 +420,7 @@ class DhcpAddressRequestorManager(object):
         """@param request_factory: Factory method that will construct the
                 specific address request.
         """
-        self._requestors_by_ip = {}
+        self._requestors_by_device_and_ip = {}
         self._request_factory = request_factory
         self.log = logging.getLogger('dhcpaddrrequestormgr')
 
@@ -404,25 +428,30 @@ class DhcpAddressRequestorManager(object):
         """@param requestor: Instance of a requestor that should be added to
                 the list of known requestors.
         """
-        if requestor.listen_address in self._requestors_by_ip:
-            self.log.error('attempt to listen on IP %s multiple times' % \
-                    requestor.listen_address)
+        listen_pair = (requestor.listen_device, requestor.listen_address)
+        if listen_pair in self._requestors_by_device_and_ip:
+            self.log.error('attempt to listen on IP %s@%s multiple times' % (
+                    requestor.listen_address, requestor.listen_device))
             return
-        self._requestors_by_ip[requestor.listen_address] = requestor
+        self._requestors_by_device_and_ip[listen_pair] = requestor
 
-    def add_request(self, local_ip, **kwargs):
+    def add_request(self, device, local_ip, **kwargs):
         """Constructs and adds a new DHCP address request.  Uses the local_ip
         to select a matching requestor.  Uses the request factory method to
         create the actual request.
 
+	@param device: Network device name from where the request should
+                originate.
         @param local_ip: IP address where the request should originate from.
         @param **kwargs: Additional keyword arguments needed by the request
                 factory method.
         """
-        if not local_ip in self._requestors_by_ip:
-            self.log.error('request for unsupported local IP %s' % local_ip)
+        listen_pair = (device, local_ip)
+        if listen_pair not in self._requestors_by_device_and_ip:
+            self.log.error('request for unsupported local IP %s@%s' % (local_ip,
+                    device))
             return
-        requestor = self._requestors_by_ip[local_ip]
+        requestor = self._requestors_by_device_and_ip[listen_pair]
         request = self._request_factory(requestor=weakref.proxy(requestor),
                 local_ip=local_ip, **kwargs)
         requestor.add_request(request)

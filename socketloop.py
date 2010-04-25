@@ -20,6 +20,8 @@
 import select
 import traceback
 import logging
+import sys
+import errno
 
 
 class SocketLoop(object):
@@ -43,8 +45,14 @@ class SocketLoop(object):
         while self._run:
             # We currently only care about read events. (Read events also cover
             # connect events on listening sockets.)
-            ready_input_sockets, _, _ = select.select(self.sockets, [], [],
-                    self.timeout)
+            try:
+                ready_input_sockets, _, _ = select.select(self.sockets, [], [],
+                        self.timeout)
+            except select.error, ex:
+                if ex.args[0] == errno.EINTR:
+                    continue
+                else:
+                    raise
             for ready_input_socket in ready_input_sockets:
                 socket_handler = self._socket_handlers[ready_input_socket]
                 try:
@@ -86,4 +94,4 @@ class SocketLoop(object):
         """Request that the select loop be exited soon.  Sets a flag that will
         be checked for in the select loop.
         """
-        self._run = True
+        self._run = False

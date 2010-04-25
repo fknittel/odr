@@ -133,6 +133,7 @@ class OpenVpnCmdConn(CommandConnection):
             self._add_request(success_handler_clb=self._success_handler,
                     failure_handler_clb=self._failure_handler,
                     mac_addr=self._mac_addr,
+                    device=self._realm_data.dhcp_listening_device,
                     local_ip=self._realm_data.dhcp_listening_ip,
                     local_port=self._realm_data.dhcp_local_port,
                     server_ips=self._realm_data.dhcp_server_ips)
@@ -195,6 +196,8 @@ def main():
             realm_data = RealmData()
             realm_data.dhcp_local_port = cfg.getint(sect, 'dhcp_local_port')
             realm_data.vid = cfg.getint(sect, 'vid')
+            realm_data.dhcp_listening_device = \
+                    cfg.get(sect, 'dhcp_listening_device')
             realm_data.dhcp_listening_ip = cfg.get(sect, 'dhcp_listening_ip')
             realm_data.dhcp_server_ips = [i.strip() for i in \
                     cfg.get(sect, 'dhcp_server_ips').split(',')]
@@ -223,12 +226,14 @@ def main():
                 if s.startswith('realm ')]:
             requestor = dhcprequestor.DhcpAddressRequestor(
                     listen_address=cfg.get(realm_section, 'dhcp_listening_ip'),
-                    listen_port=cfg.getint(realm_section, 'dhcp_local_port'))
+                    listen_port=cfg.getint(realm_section, 'dhcp_local_port'),
+                    listen_device=cfg.get(realm_section,
+                            'dhcp_listening_device'))
             sloop.add_socket_handler(requestor)
             requestor_mgr.add_requestor(requestor)
     except dhcprequestor.DhcpLocalAddressBindFailed, ex:
-        logging.error('Could not bind to DHCP listening address %s:%d' % (
-                ex.args[0], ex.args[1]))
+        logging.error('Could not bind to DHCP listening address %s:%d@%s' % (
+                ex.args[0], ex.args[1], ex.args[2]))
         sys.exit(1)
 
     context.files_preserve = sloop.sockets
