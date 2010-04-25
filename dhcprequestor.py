@@ -179,6 +179,18 @@ class DhcpAddressRequest(object):
                     self._max_retries + 1))
             self._requestor.send_packet(packet, str(server_ip), 67)
 
+    def _valid_source_address(self, packet):
+        ip_address, port = packet.source_address
+        if port != 67:
+            self.log.debug("dropping packet from wrong port: %s:%d" % \
+                    packet.source_address)
+            return False
+        if ip_address not in self._server_ips:
+            self.log.debug("dropping packet from wrong IP address: %s:%d" % \
+                    packet.source_address)
+            return False
+        return True
+
     def handle_dhcp_offer(self, offer_packet):
         """Called by the requestor as soon as a DHCP OFFER packet is received
         for our XID.
@@ -189,6 +201,8 @@ class DhcpAddressRequest(object):
         if self._state != self.AR_DISCOVER:
             return
         self.log.debug("Received offer")
+        if not self._valid_source_address(offer_packet):
+            return
         self._timeout_mgr.del_timeout_object(self)
         req_packet = self._generate_request(offer_packet)
         self._retrieve_server_ip(req_packet)
@@ -208,6 +222,8 @@ class DhcpAddressRequest(object):
         if self._state != self.AR_REQUEST:
             return
         self.log.debug("Received ACK")
+        if not self._valid_source_address(packet):
+            return
         self._timeout_mgr.del_timeout_object(self)
         self._requestor.del_request(self)
         result = {}
@@ -246,6 +262,8 @@ class DhcpAddressRequest(object):
         if self._state != self.AR_REQUEST:
             return
         self.log.debug("Received NACK")
+        if not self._valid_source_address(packet):
+            return
         self._timeout_mgr.del_timeout_object(self)
         self._requestor.del_request(self)
         self._failure_handler()
