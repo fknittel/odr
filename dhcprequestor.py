@@ -246,6 +246,8 @@ class DhcpAddressRequest(object):
         while len(dns_list) >= 4:
             dns.append(str(ipv4(dns_list[:4])))
             dns_list = dns_list[4:]
+        result['lease_time'] = ipv4(packet.GetOption('ip_address_lease_time'))\
+                .int()
 
         self._success_handler(result)
 

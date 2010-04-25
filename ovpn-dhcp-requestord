@@ -75,6 +75,11 @@ class OpenVpnCmdConn(CommandConnection):
 
     def _success_handler(self, res):
         self.log.debug('DHCP request succeeded: %s' % repr(res))
+        if res['lease_time'] < self._realm_data.expected_dhcp_lease_time:
+            self.log.warn("Received IP address lease time lower than the " \
+                    "expected time: %ds < %ds" % (res['lease_time'],
+                            self._realm_data.expected_dhcp_lease_time))
+
 	self.log.debug('writing OpenVPN client configuration to "%s"' %
                 self._config_fn)
         conf_fp = open(self._config_fn, 'wb')
@@ -192,6 +197,8 @@ def main():
             realm_data.dhcp_listening_ip = cfg.get(sect, 'dhcp_listening_ip')
             realm_data.dhcp_server_ips = [i.strip() for i in \
                     cfg.get(sect, 'dhcp_server_ips').split(',')]
+            realm_data.expected_dhcp_lease_time = \
+                    cfg.getint(sect, 'expected_dhcp_lease_time')
             return realm_data
         else:
             logging.error('Unknown realm %s.' % realm)
