@@ -1,3 +1,8 @@
 #!/usr/bin/make -f
 %:
 	dh $@
+
+odr-git-build:
+	git buildpackage -us -uc \
+		--git-export-dir=../build-area \
+		--git-debian-branch=debian --git-upstream-branch=master
