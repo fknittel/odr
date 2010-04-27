@@ -188,6 +188,9 @@ def drop_caps(user, group, caps):
     prctl.cap_inheritable.limit()
 
 def main():
+    prctl.set_name('odr')
+    prctl.set_proctitle(' '.join(sys.argv))
+
     parser = OptionParser()
     parser.add_option("-c", "--config", dest="config_file",
             help="Configuration file", default=CONFIG_FILE)
