@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # vim:set encoding=utf-8 ft=python ts=8 sw=4 sts=4 et cindent:
 
-# odr -- OpenVPN DHCP Requestor daemon
+# odrd -- OpenVPN DHCP Requestor daemon
 #
 # Copyright © 2010 Fabian Knittel <fabian.knittel@avona.com>
 #
@@ -30,11 +30,11 @@ import prctl
 from optparse import OptionParser
 from ConfigParser import SafeConfigParser
 
-import machasher
-from cmdconnection import CommandConnection, CommandConnectionListener
-from timeoutmgr import TimeoutManager
-from socketloop import SocketLoop
-import dhcprequestor
+import odr.machasher
+from odr.cmdconnection import CommandConnection, CommandConnectionListener
+from odr.timeoutmgr import TimeoutManager
+from odr.socketloop import SocketLoop
+import odr.dhcprequestor
 
 CONFIG_FILE = '/etc/odr.conf'
 
@@ -195,7 +195,7 @@ def drop_caps(user=None, group=None, caps=[]):
     prctl.cap_inheritable.limit()
 
 def main():
-    prctl.set_name('odr')
+    prctl.set_name('odrd')
     prctl.set_proctitle(' '.join(sys.argv))
 
     parser = OptionParser()
