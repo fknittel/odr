@@ -23,6 +23,7 @@ import sys
 import socket
 import cmdconnection
 
+CMD_SOCKET = '/var/run/odr/cmd.sock'
 
 class flushedstream(object):
     def __init__(self, f):
@@ -43,7 +44,7 @@ ret_fn = os.environ['client_connect_deferred_file']
 full_username = os.environ['username']
 
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.connect('/tmp/bla.sock')
+s.connect(CMD_SOCKET)
 write_ret(ret_fn, 3)
 
 try:
