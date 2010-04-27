@@ -1,2 +1,1 @@
-debian/odr.sv-run etc/sv/odr/run
-debian/odr.sv-log-run etc/sv/odr/log/run
+debian/sv/* etc/sv/odr
