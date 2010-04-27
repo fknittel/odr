@@ -1,7 +1,15 @@
 #!/bin/sh
 
+SOCK_DIR="/var/run/odr"
+
 # Redirect stderr to stdout.
 exec 2>&1
+
+# Ensure that the socket directory exists.
+if ! test -d "$SOCK_DIR"; then
+       mkdir -p -m770 "$SOCK_DIR"
+       chown odr:odr "$SOCK_DIR"
+fi
 
 # Execute odr.
 exec /usr/sbin/odrd --debug
