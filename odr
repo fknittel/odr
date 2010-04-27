@@ -170,7 +170,9 @@ def drop_caps(user=None, group=None, caps=[]):
 
     if group is not None:
         # Switch to new GID.
-        os.setgid(grp.getgrnam(group).gr_gid)
+        gid = grp.getgrnam(group).gr_gid
+        os.setgid(gid)
+        os.setgroups([gid])
 
     if user is not None:
         # Retain all capabilities over UID switch.
