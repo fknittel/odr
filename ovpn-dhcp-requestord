@@ -21,7 +21,6 @@
 from __future__ import with_statement 
 
 import sys
-sys.path.append('/opt/pydhcplib')
 import logging
 import weakref
 import re
