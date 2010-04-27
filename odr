@@ -28,6 +28,7 @@ import traceback
 import os
 import grp
 import signal
+import prctl
 from optparse import OptionParser
 from ConfigParser import SafeConfigParser
 
@@ -158,6 +159,34 @@ def read_realms(cfg):
         realms[realm_name] = realm_data
     return realms
 
+def drop_caps(user, group, caps):
+    """Switches aways from UID 0 and full capabilities to a different user
+    and a limited set of capabilities.  Child processes get none of the
+    capabilities.
+    @param user: The target user
+    @param group: The target group
+    @param caps: List of capabilities to retain.
+    """
+    import pwd
+    import grp
+
+    # Retain all capabilities over UID switch.
+    prctl.set_keepcaps(True)
+
+    # Switch to new GID/UID.
+    os.setgid(grp.getgrnam(group).gr_gid)
+    os.setuid(pwd.getpwnam(user).pw_uid)
+
+    # Some capabilities might be permitted but not effective, so explicitly
+    # set them to effective here.
+    for cap in caps:
+        setattr(prctl.cap_effective, cap, True)
+    # Drop all capabilities except those listed in "caps".
+    prctl.cap_effective.limit(*caps)
+    prctl.cap_permitted.limit(*caps)
+    # Child processes may not use our capabilities.
+    prctl.cap_inheritable.limit()
+
 def main():
     parser = OptionParser()
     parser.add_option("-c", "--config", dest="config_file",
@@ -176,6 +205,12 @@ def main():
         loglevel = logging.DEBUG
     logging.basicConfig(level=loglevel)
 
+    logging.debug('Switching to user %s and group %s' % (
+                cfg.get('daemon', 'user'), cfg.get('daemon', 'group')))
+    # Capability net_raw is needed for binding to network devices.
+    # Capability net_bind_service is needed for binding to the DHCP port.
+    drop_caps(user=cfg.get('daemon', 'user'), group=cfg.get('daemon', 'group'),
+            caps=['net_raw', 'net_bind_service'])
 
     realms_data = read_realms(cfg)
 
