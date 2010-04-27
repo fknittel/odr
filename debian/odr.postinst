@@ -17,3 +17,5 @@ configure)
   test -z "$2" || sv -v term odr || :
   ;;
 esac
+
+#DEBHELPER#

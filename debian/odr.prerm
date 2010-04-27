@@ -6,3 +6,5 @@ remove|deconfigure|failed-upgrade)
   update-service --remove /etc/sv/odr || :
   ;;
 esac
+
+#DEBHELPER#
