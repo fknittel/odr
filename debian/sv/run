@@ -4,4 +4,4 @@
 exec 2>&1
 
 # Execute odr.
-exec /usr/sbin/odr --debug
+exec /usr/sbin/odrd --debug
