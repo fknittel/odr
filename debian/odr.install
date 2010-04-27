@@ -2,3 +2,4 @@ debian/sv/* etc/sv/odr
 odr usr/share/python-support/odr
 odrd usr/sbin
 odr-ovpn usr/sbin
+odr.conf etc
