@@ -235,17 +235,17 @@ def main():
     sloop.add_idle_handler(timeout_mgr)
 
     def create_dhcp_address_request(**kwargs):
-        return dhcprequestor.DhcpAddressRequest(
+        return odr.dhcprequestor.DhcpAddressRequest(
                 timeout_mgr=weakref.proxy(timeout_mgr), **kwargs)
 
-    requestor_mgr = dhcprequestor.DhcpAddressRequestorManager(
+    requestor_mgr = odr.dhcprequestor.DhcpAddressRequestorManager(
             request_factory=create_dhcp_address_request)
 
     def create_vpn_cmd_conn(sloop, socket):
         return OpenVpnCmdConn(sloop, socket,
                 realms_data=realms_data,
                 add_request_clb=requestor_mgr.add_request,
-                full_username_to_mac_clb=machasher.hash_login_to_mac)
+                full_username_to_mac_clb=odr.machasher.hash_login_to_mac)
 
     cmd_socket_perms = int(cfg.get('daemon', 'cmd_socket_perms'), 8)
     for unix_socket_fn in [u.strip() for u in \
@@ -258,13 +258,13 @@ def main():
 
     try:
         for realm_data in realms_data.values():
-            requestor = dhcprequestor.DhcpAddressRequestor(
+            requestor = odr.dhcprequestor.DhcpAddressRequestor(
                     listen_address=realm_data.dhcp_listening_ip,
                     listen_port=realm_data.dhcp_local_port,
                     listen_device=realm_data.dhcp_listening_device)
             sloop.add_socket_handler(requestor)
             requestor_mgr.add_requestor(requestor)
-    except dhcprequestor.DhcpLocalAddressBindFailed, ex:
+    except odr.dhcprequestor.DhcpLocalAddressBindFailed, ex:
         logging.error('Could not bind to DHCP listening address %s:%d@%s' % (
                 ex.args[0], ex.args[1], ex.args[2]))
         sys.exit(1)
