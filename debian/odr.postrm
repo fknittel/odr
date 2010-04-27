@@ -1,0 +1,23 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+purge)
+  sv force-stop odr || :
+  rm -rf /etc/sv/odr/supervise /etc/sv/odr/log/supervise
+  rm -rf /var/lib/supervise/odr /var/lib/supervise/odr.log
+
+  for i in '@*' current config lock state; do
+    rm -f /var/log/odr/$i
+  done
+  rmdir /var/log/odr || :
+
+  if getent passwd odrlog >/dev/null; then
+    if deluser --version >/dev/null 2>&1; then
+      deluser odrlog
+    else
+      echo 'deluser program not available, not removing system user "odrlog".' >&2
+    fi
+  fi
+  ;;
+esac

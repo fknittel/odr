@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+LOG=/var/log/odr
+
+# Ensure that the log directory exists.
+test -d "$LOG" || mkdir -p -m2750 "$LOG"
+
+# Execute svlogd
+exec svlogd -tt "$LOG"

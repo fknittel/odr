@@ -1,0 +1,14 @@
+Source: odr
+Section: net
+Priority: extra
+Maintainer: Fabian Knittel <fabian.knittel@avona.com>
+Build-Depends: debhelper (>= 7), python-support (>= 0.8)
+Standards-Version: 3.8.4
+
+Package: odr
+Architecture: all
+Depends: ${misc:Depends}, ${python:Depends}, adduser, python-pydhcplib,
+ python-prctl, runit
+Description: Provides OpenVPN client connections with IP addresses via DHCP
+ The OpenVPN DHCP requestor manages DHCP requests for OpenVPN client connect
+ events.  

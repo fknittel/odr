@@ -1,0 +1,19 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+configure)
+  getent passwd odrlog >/dev/null || \
+    adduser --system --home /nonexistent --no-create-home odrlog
+  getent group odr >/dev/null || \
+    addgroup --system odr
+  getent passwd odr >/dev/null || \
+    adduser --system --ingroup odr --home /nonexistent --no-create-home odr
+
+  # enable service
+  update-service --add /etc/sv/odr
+
+  # restart service if it was running
+  test -z "$2" || sv -v term odr || :
+  ;;
+esac
