@@ -170,6 +170,7 @@ def drop_caps(user=None, group=None, caps=[]):
 
     if group is not None:
         # Switch to new GID.
+        logging.debug('Switching to group %s' % group)
         gid = grp.getgrnam(group).gr_gid
         os.setgid(gid)
         os.setgroups([gid])
@@ -179,10 +180,12 @@ def drop_caps(user=None, group=None, caps=[]):
         prctl.set_keepcaps(True)
 
         # Switch to new UID.
+        logging.debug('Switching to user %s' % user)
         os.setuid(pwd.getpwnam(user).pw_uid)
 
     # Some capabilities might be permitted but not effective, so explicitly
     # set them to effective here.
+    logging.debug('Restricting to capabilities "%s"' % ', '.join(caps))
     for cap in caps:
         setattr(prctl.cap_effective, cap, True)
     # Drop all capabilities except those listed in "caps".
@@ -212,8 +215,6 @@ def main():
         loglevel = logging.DEBUG
     logging.basicConfig(level=loglevel)
 
-    logging.debug('Switching to user %s and group %s' % (
-                cfg.get('daemon', 'user'), cfg.get('daemon', 'group')))
     # Capability net_raw is needed for binding to network devices.
     # Capability net_bind_service is needed for binding to the DHCP port.
     drop_caps(user=cfg.get('daemon', 'user'), group=cfg.get('daemon', 'group'),
