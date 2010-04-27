@@ -159,7 +159,7 @@ def read_realms(cfg):
         realms[realm_name] = realm_data
     return realms
 
-def drop_caps(user, group, caps):
+def drop_caps(user=None, group=None, caps=[]):
     """Switches aways from UID 0 and full capabilities to a different user
     and a limited set of capabilities.  Child processes get none of the
     capabilities.
@@ -170,12 +170,16 @@ def drop_caps(user, group, caps):
     import pwd
     import grp
 
-    # Retain all capabilities over UID switch.
-    prctl.set_keepcaps(True)
+    if group is not None:
+        # Switch to new GID.
+        os.setgid(grp.getgrnam(group).gr_gid)
 
-    # Switch to new GID/UID.
-    os.setgid(grp.getgrnam(group).gr_gid)
-    os.setuid(pwd.getpwnam(user).pw_uid)
+    if user is not None:
+        # Retain all capabilities over UID switch.
+        prctl.set_keepcaps(True)
+
+        # Switch to new UID.
+        os.setuid(pwd.getpwnam(user).pw_uid)
 
     # Some capabilities might be permitted but not effective, so explicitly
     # set them to effective here.
@@ -263,6 +267,9 @@ def main():
         logging.error('Could not bind to DHCP listening address %s:%d@%s' % (
                 ex.args[0], ex.args[1], ex.args[2]))
         sys.exit(1)
+
+    # Special capabilities no longer necessary.
+    drop_caps()
 
     try:
         sloop.run()
