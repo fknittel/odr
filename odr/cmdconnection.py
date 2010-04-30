@@ -21,6 +21,8 @@
 import logging
 import socket
 import os
+import IN
+import struct
 
 
 class LineSocket(object):
@@ -182,7 +184,7 @@ class CommandConnectionListener(object):
     ACCEPT_QUEUE_LEN = 32
 
     def __init__(self, sloop, cmd_conn_factory, socket_path,
-                socket_perm_mode=0600):
+                socket_perm_mode=0666, auth_check=None):
         """Opens the POSIX Local IPC Socket.  If the file already exists, it
         is deleted first.  The file permissions are set according to the
         socket_perm_mode parameter.
@@ -195,16 +197,18 @@ class CommandConnectionListener(object):
                 file socket.
         """
         self._sloop = sloop
+        self._socket_path = socket_path
         self._factory = cmd_conn_factory
+        self._auth_check = auth_check
 
         self.log = logging.getLogger('cmdconnlistener')
         self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._socket.setblocking(False)
-        if os.path.exists(socket_path):
-            os.remove(socket_path)
-        self.log.debug('listening on socket %s' % socket_path)
-        self._socket.bind(socket_path)
-        os.chmod(socket_path, socket_perm_mode)
+        if os.path.exists(self._socket_path):
+            os.remove(self._socket_path)
+        self.log.debug('listening on socket %s' % self._socket_path)
+        self._socket.bind(self._socket_path)
+        os.chmod(self._socket_path, socket_perm_mode)
         self._socket.listen(self.ACCEPT_QUEUE_LEN)
 
     def __del__(self):
@@ -223,11 +227,33 @@ class CommandConnectionListener(object):
         each socket.
         """
         try:
-            socket, _ = self._socket.accept()
+            sock, _ = self._socket.accept()
         except IOError, e:
             print "Received exception %s while accepting new cmd conn" % repr(e)
             return
         self.log.debug('received a new connection')
-        socket.setblocking(False)
-        conn = self._factory(self._sloop, socket)
+        sock.setblocking(False)
+        if self._auth_check is not None:
+            pid, uid, gid = getsockpeercred(sock)
+            if not self._auth_check(sock=sock, pid=pid, uid=uid, gid=gid):
+                self.log.info('rejecting command connection to %s from ' \
+                        'PID %d (UID %d, GID %d)' % (self._socket_path, pid,
+                                uid, gid))
+                sock.close()
+                return
+        conn = self._factory(sloop=self._sloop, sock=sock)
         self._sloop.add_socket_handler(conn)
+
+
+def getsockpeercred(sock):
+    """Retrieves the credentials of a peer which is connected via a AF_UNIX
+    socket.
+
+    @param sock: The socket connection.
+    @return: Returns a triple with the peer's PID, UID and GID.
+    """
+    # XXX: We assume that the structure contains 3 32 bit integers.  We would
+    # need to know the system's sizes of pid_t, uid_t and gid_t to be sure.
+    # (SO_PEERCRED returns a struct ucred.)
+    return struct.unpack('3I', sock.getsockopt(socket.SOL_SOCKET,
+            IN.SO_PEERCRED, 3 * 4))

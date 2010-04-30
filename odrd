@@ -194,6 +194,9 @@ def drop_caps(user=None, group=None, caps=[]):
     # Child processes may not use our capabilities.
     prctl.cap_inheritable.limit()
 
+def split_cfg_int_list(val):
+    return [int(v.strip()) for v in val.split(',') if (len(v.strip()) > 0)]
+
 def main():
     prctl.set_name('odrd')
     prctl.set_proctitle(' '.join(sys.argv))
@@ -241,11 +244,22 @@ def main():
     requestor_mgr = odr.dhcprequestor.DhcpAddressRequestorManager(
             request_factory=create_dhcp_address_request)
 
-    def create_vpn_cmd_conn(sloop, socket):
-        return OpenVpnCmdConn(sloop, socket,
+    def create_vpn_cmd_conn(sloop, sock):
+        return OpenVpnCmdConn(sloop, sock,
                 realms_data=realms_data,
                 add_request_clb=requestor_mgr.add_request,
                 full_username_to_mac_clb=odr.machasher.hash_login_to_mac)
+
+    cmd_socket_uids = split_cfg_int_list(cfg.get('daemon',
+            'cmd_socket_uids'))
+    cmd_socket_gids = split_cfg_int_list(cfg.get('daemon',
+            'cmd_socket_gids'))
+    def cmd_conn_auth_check(sock, pid, uid, gid):
+        if uid in cmd_socket_uids:
+            return True
+        if gid in cmd_socket_gids:
+            return True
+        return False
 
     cmd_socket_perms = int(cfg.get('daemon', 'cmd_socket_perms'), 8)
     for unix_socket_fn in [u.strip() for u in \
@@ -253,7 +267,8 @@ def main():
         cmd_listener = CommandConnectionListener(sloop=weakref.proxy(sloop),
                 socket_path=unix_socket_fn,
                 cmd_conn_factory=create_vpn_cmd_conn,
-                socket_perm_mode=cmd_socket_perms)
+                socket_perm_mode=cmd_socket_perms,
+                auth_check=cmd_conn_auth_check)
         sloop.add_socket_handler(cmd_listener)
 
     try:
