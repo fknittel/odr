@@ -252,8 +252,8 @@ def getsockpeercred(sock):
     @param sock: The socket connection.
     @return: Returns a triple with the peer's PID, UID and GID.
     """
-    # XXX: We assume that the structure contains 3 32 bit integers.  We would
-    # need to know the system's sizes of pid_t, uid_t and gid_t to be sure.
-    # (SO_PEERCRED returns a struct ucred.)
-    return struct.unpack('3I', sock.getsockopt(socket.SOL_SOCKET,
-            IN.SO_PEERCRED, 3 * 4))
+    # SO_PEERCRED returns a struct ucred.  The three struct members pid_t, uid_t
+    # and gid_t are defined as "int" on Linux systems, so this should be
+    # portable across Linux architectures.
+    return struct.unpack('3i', sock.getsockopt(socket.SOL_SOCKET,
+            IN.SO_PEERCRED, struct.calcsize('3i')))
