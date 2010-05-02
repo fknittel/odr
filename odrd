@@ -206,6 +206,9 @@ def main():
             help="Configuration file", default=CONFIG_FILE)
     parser.add_option("--debug", dest="debug", action="store_true",
             help="Activate debug logging", default=False)
+    parser.add_option("--keep-user", dest="keep_user", action="store_true",
+            help="Do not switch to a different UID / GID; ignore capabilities",
+            default=False)
     (options, args) = parser.parse_args()
     if len(args) != 0:
             parser.error("incorrect number of arguments")
@@ -218,10 +221,12 @@ def main():
         loglevel = logging.DEBUG
     logging.basicConfig(level=loglevel)
 
-    # Capability net_raw is needed for binding to network devices.
-    # Capability net_bind_service is needed for binding to the DHCP port.
-    drop_caps(user=cfg.get('daemon', 'user'), group=cfg.get('daemon', 'group'),
-            caps=['net_raw', 'net_bind_service'])
+    if not options.keep_user:
+        # Capability net_raw is needed for binding to network devices.
+        # Capability net_bind_service is needed for binding to the DHCP port.
+        drop_caps(user=cfg.get('daemon', 'user'),
+                group=cfg.get('daemon', 'group'),
+                caps=['net_raw', 'net_bind_service'])
 
     realms_data = read_realms(cfg)
 
@@ -284,8 +289,9 @@ def main():
                 ex.args[0], ex.args[1], ex.args[2]))
         sys.exit(1)
 
-    # Special capabilities no longer necessary.
-    drop_caps()
+    if not options.keep_user:
+        # Special capabilities no longer necessary.
+        drop_caps()
 
     try:
         sloop.run()
