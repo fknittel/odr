@@ -4,8 +4,10 @@ odr (0.2-1) fsmi-squeeze; urgency=low
     + Avoids all access permission problems by extensively using credential
       verification and (file) credential passing for UNIX sockets.
   * Add new dependency on python-fdsend.
+  * Create /var/run/odr with 0755 instead of 0770, as odrd now handles access
+    control itsself.
 
- -- Fabian Knittel <fabian.knittel@avona.com>  Mon, 03 May 2010 20:15:19 +0200
+ -- Fabian Knittel <fabian.knittel@avona.com>  Mon, 03 May 2010 23:13:19 +0200
 
 odr (0.1-1) fsmi-squeeze; urgency=low
 
