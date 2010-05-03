@@ -51,22 +51,27 @@ class OpenVpnCmdConn(CommandConnection):
         self._realms_data = realms_data
         self._add_request = add_request_clb
         self._full_username_to_mac = full_username_to_mac_clb
-        self._ret_fn = None
+        self._ret_f = None
         self._wrote_ret = False
+        self._config_f = None
         self.log = logging.getLogger('ovpncmd')
 
     def __del__(self):
         self.log.debug('destructing OpenVpnCmdConn')
-        if self._ret_fn is not None and not self._wrote_ret:
-            self._write_ret(self.CC_RET_FAILURE)
+        if self._ret_f is not None:
+            if not self._wrote_ret:
+                self._write_ret(self.CC_RET_FAILURE)
+            self._ret_f.close()
+        if self._config_f is not None:
+            self._config_f.close()
         CommandConnection.__del__(self)
 
     def _write_ret(self, val):
-        self.log.debug('writing deferred return value %d to "%s"' % (val,
-                self._ret_fn))
-        ret_fp = open(self._ret_fn, 'wb')
-        ret_fp.write('%d' % val);
-        ret_fp.close()
+        self.log.debug('writing deferred return value %d' % val)
+        self._ret_f.seek(0)
+        self._ret_f.write('%d' % val);
+        self._ret_f.flush()
+        os.fsync(self._ret_f.fileno())
         self._wrote_ret = True
 
     def _success_handler(self, res):
@@ -76,19 +81,19 @@ class OpenVpnCmdConn(CommandConnection):
                     "expected time: %ds < %ds" % (res['lease_time'],
                             self._realm_data.expected_dhcp_lease_time))
 
-	self.log.debug('writing OpenVPN client configuration to "%s"' %
-                self._config_fn)
-        conf_fp = open(self._config_fn, 'wb')
-        conf_fp.write('ifconfig-push %s %s\n' % (res['ip-address'],
+	self.log.debug('writing OpenVPN client configuration')
+        self._config_f.seek(0)
+        self._config_f.write('ifconfig-push %s %s\n' % (res['ip-address'],
                 res['subnet-mask']))
-        conf_fp.write('vlan-pvid %d\n' % self._realm_data.vid)
-        conf_fp.write('push "ip-win32 dynamic"\n')
-        conf_fp.write('push "route-gateway %s"\n' % (res['gateway']))
-        conf_fp.write('push "redirect-gateway def1"\n')
+        self._config_f.write('vlan-pvid %d\n' % self._realm_data.vid)
+        self._config_f.write('push "ip-win32 dynamic"\n')
+        self._config_f.write('push "route-gateway %s"\n' % (res['gateway']))
+        self._config_f.write('push "redirect-gateway def1"\n')
         for dns_ip in res['dns']:
-            conf_fp.write('push "dhcp-option DNS %s"\n' % dns_ip)
-        conf_fp.write('push "dhcp-option DOMAIN %s"\n' % res['domain'])
-        conf_fp.close()
+            self._config_f.write('push "dhcp-option DNS %s"\n' % dns_ip)
+        self._config_f.write('push "dhcp-option DOMAIN %s"\n' % res['domain'])
+        self._config_f.flush()
+        os.fsync(self._config_f.fileno())
 
         self._write_ret(self.CC_RET_SUCCESS)
 
@@ -96,22 +101,33 @@ class OpenVpnCmdConn(CommandConnection):
         self.log.debug('DHCP request failed')
         self._write_ret(self.CC_RET_FAILURE)
 
-    def handle_cmd(self, cmd, params):
+    def handle_cmd(self, cmd, params, files):
         try:
             self._full_username = params['full_username']
-            self._ret_fn = params['ret_file_name']
-            self._config_fn = params['config_file_name']
+            ret_fidx = params['ret_file_idx']
+            config_fidx = params['config_file_idx']
         except KeyError, e:
             self.send_cmd('FAIL')
-            self._write_ret(self.CC_RET_FAILURE)
             self.log.warning('command "%s" is missing a parameter: %s' % (cmd,
                     e.args))
+            return
+
+        try:
+            ret_f = files[int(ret_fidx)]
+            config_f = files[int(config_fidx)]
+        except IndexError, e:
+            self.send_cmd('FAIL')
+            self.log.warning('file descriptor index out of range: %s' % e.args)
+            return
+        except ValueError, e:
+            self.send_cmd('FAIL')
+            self.log.warning('file descriptor index parsing failed: %s' % \
+                    e.args)
             return
 
         m = re.match(self.USERNAME_RE, self._full_username)
         if m is None:
             self.send_cmd('FAIL')
-            self._write_ret(self.CC_RET_FAILURE)
             self.log.warning('username in unexpected format: "%s"' % \
                     self._full_username)
             return
@@ -122,8 +138,10 @@ class OpenVpnCmdConn(CommandConnection):
             logging.error('Unknown realm %s.' % self._realm)
             return
         self._realm_data = self._realms_data[self._realm]
- 
+
         self.send_cmd('OK')
+        self._ret_f = ret_f
+        self._config_f = config_f
 
         self._mac_addr = self._full_username_to_mac(self._full_username)
 

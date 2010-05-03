@@ -23,55 +23,7 @@ import socket
 import os
 import IN
 import struct
-
-
-class LineSocket(object):
-    """The LineSocket class wraps around a regular socket object.  Instead of
-    byte blobs, the class allows lines to be received.
-    """
-
-    def __init__(self, socket):
-        """@param socket: The socket that is used to receive the line data from.
-        """
-        self._socket = socket
-        self._in_buf = ''
-
-    def __del__(self):
-        self.close()
-
-    def close(self):
-        """Close the underlying socket.  Further access to the socket is not
-        allowed.
-        """
-        self._socket.close()
-
-    def recv_lines(self):
-        """Receives data from the socket.  The received data is buffered until a
-        complete line can be retrieved.  Each call of this method will return
-        the next completed line.
-
-        @return: Returns None in case of EOF, otherwise the next completed
-        line.
-        """
-        new_data = self._socket.recv(1024)
-        self._in_buf += new_data
-        lines = self._in_buf.split('\n')
-        if new_data == '' and len(lines) == 1 and lines[0] == '':
-            # Received EOF and no data left in _in_buf.  Indicate EOF to caller.
-            return None
-        self._in_buf = lines.pop()
-        return lines
-
-    def send(self, msg):
-        """Sends data via the underlying socket.
-        @param msg: The byte string to send via the socket.
-        """
-        self._socket.send(msg)
-
-    def fileno(self):
-        """@return: Returns the file descriptor number of the underlying socket.
-        """
-        return self._socket.fileno()
+import fdsend
 
 
 def unpack_cmd(cmd_line):
@@ -106,9 +58,12 @@ class CommandConnection(object):
     as a base-class.  Sub-classes will implement the stub methods to provide the
     actual functionality.
 
-    The communication is line based.  Each command is on a single line and ends
-    with a new-line character.
+    The communication is message based.  One command per message.  Optionally,
+    the command can transfer up to 8 writable file descriptors.
     """
+
+    MAX_NUM_FDS = 8
+    MAX_MSG_SIZE = 1024
 
     def __init__(self, sloop, socket):
         """\
@@ -116,7 +71,7 @@ class CommandConnection(object):
         @param socket: Socket that will be used for communication.
         """
         self._sloop = sloop
-        self._socket = LineSocket(socket)
+        self._socket = socket
 
     def __del__(self):
         self.log.debug('destructing CommandConnection')
@@ -128,7 +83,7 @@ class CommandConnection(object):
         """
         return self._socket
 
-    def _parse_command(self, cmd_line):
+    def _parse_command(self, cmd_line, files):
         """Splits the command-line and hands off the parsed data to the
         child class' handle_cmd method.
         @param cmd_line: The command line string to parse.
@@ -138,8 +93,7 @@ class CommandConnection(object):
         if cmd is None:
             self.log.warning('failed to parse command "%s"' % cmd_line)
             return
-        self.handle_cmd(cmd, params)
-
+        self.handle_cmd(cmd, params, files)
 
     def handle_socket(self):
         """Part of the interface expected by the socket loop.  Should be called
@@ -150,24 +104,30 @@ class CommandConnection(object):
         In case of EOF, the socket will be removed from the socket loop and this
         instance will get destroyed.
         """
-        cmd_lines = self._socket.recv_lines()
-        if cmd_lines is not None:
-            for cmd_line in cmd_lines:
-                self._parse_command(cmd_line)
+        cmd_line, fds = fdsend.recvfds(self._socket, self.MAX_MSG_SIZE,
+                numfds=self.MAX_NUM_FDS)
+
+        # By wrapping the files in objects, they will be implicitly closed
+        # (assuming a reference counted Python).
+        files = [os.fdopen(fd, 'wb') for fd in fds]
+
+        if cmd_line != '':
+            self._parse_command(cmd_line, files=files)
         else:
             self.log.debug('closing cmd socket due to EOF')
             self._sloop.del_socket_handler(self)
 
-    def send_cmd(self, cmd, params={}):
+    def send_cmd(self, cmd, params={}, files=None):
         """Used to send responses back to the client.  Sends the specified
-        command as a single-line.
+        command as a single message.
 
         @param cmd: Command to send. Should not contain a new-line or a zero
                 character.
         @param params: Parameters to send. Should not contain a new-line or a
-                zero character.
+                zero character.  (Optional.)
+        @param files: File handles to send.  (Optional.)
         """
-        self._socket.send(pack_cmd(cmd, params) + '\n')
+        fdsend.sendfds(self._socket, pack_cmd(cmd, params), fds=files)
 
     def handle_command(self,  cmd):
         """The handle_command function is called as soon as a command was
