@@ -1,3 +1,12 @@
+odr (0.2-1) fsmi-squeeze; urgency=low
+
+  * New upstream release:
+    + Avoids all access permission problems by extensively using credential
+      verification and (file) credential passing for UNIX sockets.
+  * Add new dependency on python-fdsend.
+
+ -- Fabian Knittel <fabian.knittel@avona.com>  Mon, 03 May 2010 20:15:19 +0200
+
 odr (0.1-1) fsmi-squeeze; urgency=low
 
   * Initial release.
