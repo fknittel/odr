@@ -21,7 +21,8 @@
 import os
 import sys
 import socket
-import cmdconnection
+import odr.cmdconnection
+import fdsend
 
 CMD_SOCKET = '/var/run/odr/cmd.sock'
 
@@ -34,26 +35,33 @@ class flushedstream(object):
 sys.stdout = flushedstream(sys.stdout)
 sys.stderr = flushedstream(sys.stderr)
 
-def write_ret(ret_fn, val):
-    ret_fp = open(ret_fn, 'wb')
-    ret_fp.write('%d' % val);
-    ret_fp.close()
+def write_ret(ret_f, val):
+    ret_f.seek(0)
+    ret_f.write('%d' % val);
+    ret_f.flush()
+    os.fsync(ret_f.fileno())
 
 cfg_fn = os.environ['client_connect_config_file']
 ret_fn = os.environ['client_connect_deferred_file']
 full_username = os.environ['username']
 
+cfg_f = open(cfg_fn, 'wb')
+ret_f = open(ret_fn, 'wb')
+
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.connect(CMD_SOCKET)
-write_ret(ret_fn, 3)
+write_ret(ret_f, 3)
 
 try:
-    s.send(cmdconnection.pack_cmd('request', {'full_username':full_username,
-            'ret_file_name':ret_fn, 'config_file_name':cfg_fn}) + '\n')
-    ret = s.recv(1024)
+    fdsend.sendfds(s, odr.cmdconnection.pack_cmd('request', {
+            'full_username':full_username,
+            'ret_file_idx':'0',
+            'config_file_idx':'1'}), fds=[ret_f, cfg_f])
+
+    ret, _ = fdsend.recvfds(s, 1024, numfds=0)
     print 'Received: %s' % ret
-    if ret != 'OK\n':
+    if ret != 'OK':
         raise RuntimeError('starting dhcp request failed')
 except:
-    write_ret(ret_fn, 1)
+    write_ret(ret_f, 1)
     raise

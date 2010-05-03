@@ -21,55 +21,9 @@
 import logging
 import socket
 import os
-
-
-class LineSocket(object):
-    """The LineSocket class wraps around a regular socket object.  Instead of
-    byte blobs, the class allows lines to be received.
-    """
-
-    def __init__(self, socket):
-        """@param socket: The socket that is used to receive the line data from.
-        """
-        self._socket = socket
-        self._in_buf = ''
-
-    def __del__(self):
-        self.close()
-
-    def close(self):
-        """Close the underlying socket.  Further access to the socket is not
-        allowed.
-        """
-        self._socket.close()
-
-    def recv_lines(self):
-        """Receives data from the socket.  The received data is buffered until a
-        complete line can be retrieved.  Each call of this method will return
-        the next completed line.
-
-        @return: Returns None in case of EOF, otherwise the next completed
-        line.
-        """
-        new_data = self._socket.recv(1024)
-        self._in_buf += new_data
-        lines = self._in_buf.split('\n')
-        if new_data == '' and len(lines) == 1 and lines[0] == '':
-            # Received EOF and no data left in _in_buf.  Indicate EOF to caller.
-            return None
-        self._in_buf = lines.pop()
-        return lines
-
-    def send(self, msg):
-        """Sends data via the underlying socket.
-        @param msg: The byte string to send via the socket.
-        """
-        self._socket.send(msg)
-
-    def fileno(self):
-        """@return: Returns the file descriptor number of the underlying socket.
-        """
-        return self._socket.fileno()
+import IN
+import struct
+import fdsend
 
 
 def unpack_cmd(cmd_line):
@@ -104,9 +58,12 @@ class CommandConnection(object):
     as a base-class.  Sub-classes will implement the stub methods to provide the
     actual functionality.
 
-    The communication is line based.  Each command is on a single line and ends
-    with a new-line character.
+    The communication is message based.  One command per message.  Optionally,
+    the command can transfer up to 8 writable file descriptors.
     """
+
+    MAX_NUM_FDS = 8
+    MAX_MSG_SIZE = 1024
 
     def __init__(self, sloop, socket):
         """\
@@ -114,9 +71,10 @@ class CommandConnection(object):
         @param socket: Socket that will be used for communication.
         """
         self._sloop = sloop
-        self._socket = LineSocket(socket)
+        self._socket = socket
 
     def __del__(self):
+        self.log.debug('destructing CommandConnection')
         self._socket.close()
 
     @property
@@ -125,7 +83,7 @@ class CommandConnection(object):
         """
         return self._socket
 
-    def _parse_command(self, cmd_line):
+    def _parse_command(self, cmd_line, files):
         """Splits the command-line and hands off the parsed data to the
         child class' handle_cmd method.
         @param cmd_line: The command line string to parse.
@@ -135,8 +93,7 @@ class CommandConnection(object):
         if cmd is None:
             self.log.warning('failed to parse command "%s"' % cmd_line)
             return
-        self.handle_cmd(cmd, params)
-
+        self.handle_cmd(cmd, params, files)
 
     def handle_socket(self):
         """Part of the interface expected by the socket loop.  Should be called
@@ -147,24 +104,30 @@ class CommandConnection(object):
         In case of EOF, the socket will be removed from the socket loop and this
         instance will get destroyed.
         """
-        cmd_lines = self._socket.recv_lines()
-        if cmd_lines is not None:
-            for cmd_line in cmd_lines:
-                self._parse_command(cmd_line)
+        cmd_line, fds = fdsend.recvfds(self._socket, self.MAX_MSG_SIZE,
+                numfds=self.MAX_NUM_FDS)
+
+        # By wrapping the files in objects, they will be implicitly closed
+        # (assuming a reference counted Python).
+        files = [os.fdopen(fd, 'wb') for fd in fds]
+
+        if cmd_line != '':
+            self._parse_command(cmd_line, files=files)
         else:
             self.log.debug('closing cmd socket due to EOF')
             self._sloop.del_socket_handler(self)
 
-    def send_cmd(self, cmd, params={}):
+    def send_cmd(self, cmd, params={}, files=None):
         """Used to send responses back to the client.  Sends the specified
-        command as a single-line.
+        command as a single message.
 
         @param cmd: Command to send. Should not contain a new-line or a zero
                 character.
         @param params: Parameters to send. Should not contain a new-line or a
-                zero character.
+                zero character.  (Optional.)
+        @param files: File handles to send.  (Optional.)
         """
-        self._socket.send(pack_cmd(cmd, params) + '\n')
+        fdsend.sendfds(self._socket, pack_cmd(cmd, params), fds=files)
 
     def handle_command(self,  cmd):
         """The handle_command function is called as soon as a command was
@@ -182,7 +145,7 @@ class CommandConnectionListener(object):
     ACCEPT_QUEUE_LEN = 32
 
     def __init__(self, sloop, cmd_conn_factory, socket_path,
-                socket_perm_mode=0600):
+                socket_perm_mode=0666, auth_check=None):
         """Opens the POSIX Local IPC Socket.  If the file already exists, it
         is deleted first.  The file permissions are set according to the
         socket_perm_mode parameter.
@@ -195,16 +158,18 @@ class CommandConnectionListener(object):
                 file socket.
         """
         self._sloop = sloop
+        self._socket_path = socket_path
         self._factory = cmd_conn_factory
+        self._auth_check = auth_check
 
         self.log = logging.getLogger('cmdconnlistener')
         self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._socket.setblocking(False)
-        if os.path.exists(socket_path):
-            os.remove(socket_path)
-        self.log.debug('listening on socket %s' % socket_path)
-        self._socket.bind(socket_path)
-        os.chmod(socket_path, socket_perm_mode)
+        if os.path.exists(self._socket_path):
+            os.remove(self._socket_path)
+        self.log.debug('listening on socket %s' % self._socket_path)
+        self._socket.bind(self._socket_path)
+        os.chmod(self._socket_path, socket_perm_mode)
         self._socket.listen(self.ACCEPT_QUEUE_LEN)
 
     def __del__(self):
@@ -223,11 +188,33 @@ class CommandConnectionListener(object):
         each socket.
         """
         try:
-            socket, _ = self._socket.accept()
+            sock, _ = self._socket.accept()
         except IOError, e:
             print "Received exception %s while accepting new cmd conn" % repr(e)
             return
         self.log.debug('received a new connection')
-        socket.setblocking(False)
-        conn = self._factory(self._sloop, socket)
+        sock.setblocking(False)
+        if self._auth_check is not None:
+            pid, uid, gid = getsockpeercred(sock)
+            if not self._auth_check(sock=sock, pid=pid, uid=uid, gid=gid):
+                self.log.info('rejecting command connection to %s from ' \
+                        'PID %d (UID %d, GID %d)' % (self._socket_path, pid,
+                                uid, gid))
+                sock.close()
+                return
+        conn = self._factory(sloop=self._sloop, sock=sock)
         self._sloop.add_socket_handler(conn)
+
+
+def getsockpeercred(sock):
+    """Retrieves the credentials of a peer which is connected via a AF_UNIX
+    socket.
+
+    @param sock: The socket connection.
+    @return: Returns a triple with the peer's PID, UID and GID.
+    """
+    # SO_PEERCRED returns a struct ucred.  The three struct members pid_t, uid_t
+    # and gid_t are defined as "int" on Linux systems, so this should be
+    # portable across Linux architectures.
+    return struct.unpack('3i', sock.getsockopt(socket.SOL_SOCKET,
+            IN.SO_PEERCRED, struct.calcsize('3i')))

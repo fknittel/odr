@@ -39,8 +39,26 @@ class SocketLoop(object):
         self.timeout = 0.5
         self.log = logging.getLogger('socketloop')
 
+    def _handle_ready_input_sockets(self, ready_input_sockets):
+        for ready_input_socket in ready_input_sockets:
+            socket_handler = self._socket_handlers[ready_input_socket]
+            try:
+                socket_handler.handle_socket()
+            except:
+                self.log.exception('socket handler failed, removing')
+                self.del_socket_handler(socket_handler)
+
+    def _handle_idle_handlers(self):
+        for idle_handler in self._idle_handlers[:]:
+            try:
+                idle_handler()
+            except:
+                self.log.exception('idle handler failed, removing')
+                self.del_idle_handler(idle_handler)
+
     def run(self):
-        """Runs the socket select loop until the quit method is called.
+        """Runs the socket select loop until the quit method is called.  Calls
+        the idle handlers after each loop cycle.
         """
         while self._run:
             # We currently only care about read events. (Read events also cover
@@ -53,36 +71,38 @@ class SocketLoop(object):
                     continue
                 else:
                     raise
-            for ready_input_socket in ready_input_sockets:
-                socket_handler = self._socket_handlers[ready_input_socket]
-                try:
-                    socket_handler.handle_socket()
-                except:
-                    self.log.exception('socket handler failed')
-
-            for idle_handler in self._idle_handlers:
-                try:
-                    idle_handler()
-                except:
-                    self.log.exception('idle handler failed')
+            self._handle_ready_input_sockets(ready_input_sockets)
+            self._handle_idle_handlers()
 
     def add_socket_handler(self, socket_handler):
         """Add an additional socket handler.
         @param socket_handler: The socket handler instance to add.
         """
+        self.log.debug('adding socket_handler for socket %d' % \
+                socket_handler.socket.fileno())
         self._socket_handlers[socket_handler.socket] = socket_handler
 
     def del_socket_handler(self, socket_handler):
         """Remove a previously added socket handler.
         @param socket_handler: The socket handler instance to remove.
         """
+        self.log.debug('removing socket_handler for socket %d' % \
+                socket_handler.socket.fileno())
         del self._socket_handlers[socket_handler.socket]
 
     def add_idle_handler(self, idle_handler):
         """Add an idle handler.
         @param idle_handler: The idle handler instance to add.
         """
+        self.log.debug('adding idle_handler')
         self._idle_handlers.append(idle_handler)
+
+    def del_idle_handler(self, idle_handler):
+        """Remove a previously added idle handler.
+        @param idle_handler: The idle handler instance to remove.
+        """
+        self.log.debug('removing idle_handler')
+        self._idle_handlers.remove(idle_handler)
 
     @property
     def sockets(self):
