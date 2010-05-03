@@ -43,7 +43,7 @@ class OpenVpnCmdConn(CommandConnection):
     CC_RET_SUCCESS = 2
     CC_RET_DEFERRED = 3
 
-    USERNAME_RE = r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?@(?P<domain>[^/@]+)(/(?P<realm>[^/@]+))?$'
+    USERNAME_RE = r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?@((?P<domain>[^/@]+)/)?(?P<realm>[^/@]+)$'
 
     def __init__(self, sloop, socket, realms_data, add_request_clb,
             full_username_to_mac_clb):
