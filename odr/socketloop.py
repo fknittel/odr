@@ -78,24 +78,30 @@ class SocketLoop(object):
         """Add an additional socket handler.
         @param socket_handler: The socket handler instance to add.
         """
+        self.log.debug('adding socket_handler for socket %d' % \
+                socket_handler.socket.fileno())
         self._socket_handlers[socket_handler.socket] = socket_handler
 
     def del_socket_handler(self, socket_handler):
         """Remove a previously added socket handler.
         @param socket_handler: The socket handler instance to remove.
         """
+        self.log.debug('removing socket_handler for socket %d' % \
+                socket_handler.socket.fileno())
         del self._socket_handlers[socket_handler.socket]
 
     def add_idle_handler(self, idle_handler):
         """Add an idle handler.
         @param idle_handler: The idle handler instance to add.
         """
+        self.log.debug('adding idle_handler')
         self._idle_handlers.append(idle_handler)
 
     def del_idle_handler(self, idle_handler):
         """Remove a previously added idle handler.
         @param idle_handler: The idle handler instance to remove.
         """
+        self.log.debug('removing idle_handler')
         self._idle_handlers.remove(idle_handler)
 
     @property
