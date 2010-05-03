@@ -45,14 +45,16 @@ class SocketLoop(object):
             try:
                 socket_handler.handle_socket()
             except:
-                self.log.exception('socket handler failed')
+                self.log.exception('socket handler failed, removing')
+                self.del_socket_handler(socket_handler)
 
     def _handle_idle_handlers(self):
-        for idle_handler in self._idle_handlers:
+        for idle_handler in self._idle_handlers[:]:
             try:
                 idle_handler()
             except:
-                self.log.exception('idle handler failed')
+                self.log.exception('idle handler failed, removing')
+                self.del_idle_handler(idle_handler)
 
     def run(self):
         """Runs the socket select loop until the quit method is called.  Calls
@@ -89,6 +91,12 @@ class SocketLoop(object):
         @param idle_handler: The idle handler instance to add.
         """
         self._idle_handlers.append(idle_handler)
+
+    def del_idle_handler(self, idle_handler):
+        """Remove a previously added idle handler.
+        @param idle_handler: The idle handler instance to remove.
+        """
+        self._idle_handlers.remove(idle_handler)
 
     @property
     def sockets(self):
