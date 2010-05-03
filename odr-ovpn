@@ -21,7 +21,7 @@
 import os
 import sys
 import socket
-import cmdconnection
+import odr.cmdconnection
 
 CMD_SOCKET = '/var/run/odr/cmd.sock'
 
@@ -48,7 +48,7 @@ s.connect(CMD_SOCKET)
 write_ret(ret_fn, 3)
 
 try:
-    s.send(cmdconnection.pack_cmd('request', {'full_username':full_username,
+    s.send(odr.cmdconnection.pack_cmd('request', {'full_username':full_username,
             'ret_file_name':ret_fn, 'config_file_name':cfg_fn}) + '\n')
     ret = s.recv(1024)
     print 'Received: %s' % ret
