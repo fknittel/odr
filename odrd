@@ -56,6 +56,7 @@ class OpenVpnCmdConn(CommandConnection):
         self.log = logging.getLogger('ovpncmd')
 
     def __del__(self):
+        self.log.debug('destructing OpenVpnCmdConn')
         if self._ret_fn is not None and not self._wrote_ret:
             self._write_ret(self.CC_RET_FAILURE)
         CommandConnection.__del__(self)

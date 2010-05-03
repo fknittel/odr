@@ -119,6 +119,7 @@ class CommandConnection(object):
         self._socket = LineSocket(socket)
 
     def __del__(self):
+        self.log.debug('destructing CommandConnection')
         self._socket.close()
 
     @property
