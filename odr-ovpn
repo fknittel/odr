@@ -21,7 +21,8 @@
 import os
 import sys
 import socket
-import odr.cmdconnection
+import odr.ovpn as ovpn
+import odr.cmdconnection as cmdconnection
 import fdsend
 
 CMD_SOCKET = '/var/run/odr/cmd.sock'
@@ -35,25 +36,17 @@ class flushedstream(object):
 sys.stdout = flushedstream(sys.stdout)
 sys.stderr = flushedstream(sys.stderr)
 
-def write_ret(ret_f, val):
-    ret_f.seek(0)
-    ret_f.write('%d' % val);
-    ret_f.flush()
-    os.fsync(ret_f.fileno())
 
-cfg_fn = os.environ['client_connect_config_file']
-ret_fn = os.environ['client_connect_deferred_file']
+cfg_f = open(os.environ['client_connect_config_file'], 'wb')
+ret_f = open(os.environ['client_connect_deferred_file'], 'wb')
 full_username = os.environ['username']
-
-cfg_f = open(cfg_fn, 'wb')
-ret_f = open(ret_fn, 'wb')
 
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.connect(CMD_SOCKET)
-write_ret(ret_f, 3)
 
+ovpn.write_deferred_ret_file(ret_f, ovpn.CC_RET_DEFERRED)
 try:
-    fdsend.sendfds(s, odr.cmdconnection.pack_cmd('request', {
+    fdsend.sendfds(s, cmdconnection.pack_cmd('request', {
             'full_username':full_username,
             'ret_file_idx':'0',
             'config_file_idx':'1'}), fds=[ret_f, cfg_f])
@@ -63,5 +56,5 @@ try:
     if ret != 'OK':
         raise RuntimeError('starting dhcp request failed')
 except:
-    write_ret(ret_f, 1)
+    ovpn.write_deferred_ret_file(ret_f, ovpn.CC_RET_FAILED)
     raise

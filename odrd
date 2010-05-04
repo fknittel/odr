@@ -30,6 +30,7 @@ import prctl
 from optparse import OptionParser
 from ConfigParser import SafeConfigParser
 
+import odr.ovpn as ovpn
 import odr.machasher
 from odr.cmdconnection import CommandConnection, CommandConnectionListener
 from odr.timeoutmgr import TimeoutManager
@@ -39,10 +40,6 @@ import odr.dhcprequestor
 CONFIG_FILE = '/etc/odr.conf'
 
 class OpenVpnCmdConn(CommandConnection):
-    CC_RET_FAILURE = 1
-    CC_RET_SUCCESS = 2
-    CC_RET_DEFERRED = 3
-
     USERNAME_RE = r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?@((?P<domain>[^/@]+)/)?(?P<realm>[^/@]+)$'
 
     def __init__(self, sloop, socket, realms_data, add_request_clb,
@@ -60,7 +57,7 @@ class OpenVpnCmdConn(CommandConnection):
         self.log.debug('destructing OpenVpnCmdConn')
         if self._ret_f is not None:
             if not self._wrote_ret:
-                self._write_ret(self.CC_RET_FAILURE)
+                self._write_ret(ovpn.CC_RET_FAILED)
             self._ret_f.close()
         if self._config_f is not None:
             self._config_f.close()
@@ -68,10 +65,7 @@ class OpenVpnCmdConn(CommandConnection):
 
     def _write_ret(self, val):
         self.log.debug('writing deferred return value %d' % val)
-        self._ret_f.seek(0)
-        self._ret_f.write('%d' % val);
-        self._ret_f.flush()
-        os.fsync(self._ret_f.fileno())
+        ovpn.write_deferred_ret_file(self._ret_f, val)
         self._wrote_ret = True
 
     def _success_handler(self, res):
@@ -95,11 +89,11 @@ class OpenVpnCmdConn(CommandConnection):
         self._config_f.flush()
         os.fsync(self._config_f.fileno())
 
-        self._write_ret(self.CC_RET_SUCCESS)
+        self._write_ret(ovpn.CC_RET_SUCCEEDED)
 
     def _failure_handler(self):
         self.log.debug('DHCP request failed')
-        self._write_ret(self.CC_RET_FAILURE)
+        self._write_ret(ovpn.CC_RET_FAILED)
 
     def handle_cmd(self, cmd, params, files):
         try:
