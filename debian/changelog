@@ -1,3 +1,10 @@
+odr (0.5-1) local; urgency=low
+
+  * New upstream release:
+    + Fix DHCP multi-server support.
+
+ -- Fabian Knittel <fabian.knittel@avona.com>  Thu, 06 May 2010 16:04:41 +0200
+
 odr (0.4-1) local; urgency=low
 
   * New upstream release:
