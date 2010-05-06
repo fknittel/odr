@@ -1,3 +1,12 @@
+odr (0.4-1) local; urgency=low
+
+  * New upstream release:
+    + Various configuration options optional now.
+    + Optionally auto-detects IP-adress from given interface.
+  * Add dependency on python-netifaces.
+
+ -- Fabian Knittel <fabian.knittel@avona.com>  Thu, 06 May 2010 13:15:05 +0200
+
 odr (0.3-1) local; urgency=low
 
   * New upstream release:
