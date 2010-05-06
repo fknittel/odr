@@ -79,7 +79,7 @@ class DhcpAddressRequest(object):
         self._failure_handler = kwargs["failure_handler_clb"]
         self._local_ip = ipv4(kwargs["local_ip"])
         self._mac_addr = hwmac(kwargs["mac_addr"])
-        self._server_ips = kwargs["server_ips"]
+        self._server_ips = [ipv4(ip) for ip in kwargs["server_ips"]]
         self._max_retries = kwargs.get("max_retries", 2)
         self._timeout = kwargs.get("timeout", 5)
 
@@ -152,7 +152,9 @@ class DhcpAddressRequest(object):
             except:
                 pass
             else:
-                self.log.debug("Found server ips %s" % str(self._server_ips))
+                # We were able to determine a single DHCP server with which we
+                # will communicate from now on.
+                self.log.debug("Found server ip %s" % self._server_ips[0].str())
 
     def _send_packet(self, packet):
         """Method to initially send a packet.
@@ -175,12 +177,13 @@ class DhcpAddressRequest(object):
         self._timeout_mgr.add_timeout_object(self)
         for server_ip in self._server_ips:
             self.log.debug("Sending packet in state %d to %s [%d/%d]" % (
-                    self._state, str(server_ip), self._packet_retries + 1,
+                    self._state, server_ip.str(), self._packet_retries + 1,
                     self._max_retries + 1))
-            self._requestor.send_packet(packet, str(server_ip), 67)
+            self._requestor.send_packet(packet, server_ip.str(), 67)
 
     def _valid_source_address(self, packet):
         ip_address, port = packet.source_address
+        ip_address = ipv4(ip_address)
         if port != 67:
             self.log.debug("dropping packet from wrong port: %s:%d" % \
                     packet.source_address)
