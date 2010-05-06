@@ -190,7 +190,7 @@ def read_realms(cfg):
         realm_data.dhcp_listening_device = cfg_get_def(cfg, sect,
                 'dhcp_listening_device')
         realm_data.dhcp_listening_ip = cfg_get_def(cfg, sect,
-                'dhcp_listening_ip')
+                'dhcp_listening_ip', '')
 
         realm_data.dhcp_server_ips = [i.strip() for i in \
                 cfg.get(sect, 'dhcp_server_ips').split(',')]
@@ -225,19 +225,25 @@ def drop_caps(user=None, group=None, caps=[]):
         logging.debug('Switching to user %s' % user)
         os.setuid(pwd.getpwnam(user).pw_uid)
 
-    # Some capabilities might be permitted but not effective, so explicitly
-    # set them to effective here.
-    logging.debug('Restricting to capabilities "%s"' % ', '.join(caps))
-    for cap in caps:
-        setattr(prctl.cap_effective, cap, True)
+    if len(caps) > 0:
+        logging.debug('Restricting to capabilities "%s"' % ', '.join(caps))
+        # Some capabilities might be permitted but not effective, so explicitly
+        # set them to effective here.
+        for cap in caps:
+            setattr(prctl.cap_effective, cap, True)
+    else:
+        logging.debug('Dropping all capabilities.')
     # Drop all capabilities except those listed in "caps".
     prctl.cap_effective.limit(*caps)
     prctl.cap_permitted.limit(*caps)
     # Child processes may not use our capabilities.
     prctl.cap_inheritable.limit()
 
+def split_cfg_list(val):
+    return [v.strip() for v in val.split(',') if (len(v.strip()) > 0)]
+
 def split_cfg_int_list(val):
-    return [int(v.strip()) for v in val.split(',') if (len(v.strip()) > 0)]
+    return [int(v) for v in split_cfg_list(val)]
 
 def main():
     prctl.set_name('odrd')
@@ -266,8 +272,8 @@ def main():
     if not options.keep_user:
         # Capability net_raw is needed for binding to network devices.
         # Capability net_bind_service is needed for binding to the DHCP port.
-        drop_caps(user=cfg.get('daemon', 'user'),
-                group=cfg.get('daemon', 'group'),
+        drop_caps(user=cfg_get_def(cfg, 'daemon', 'user', None),
+                group=cfg_get_def(cfg, 'daemon', 'group', None),
                 caps=['net_raw', 'net_bind_service'])
 
     realms_data = read_realms(cfg)
@@ -297,10 +303,10 @@ def main():
                 add_request_clb=requestor_mgr.add_request,
                 full_username_to_mac_clb=odr.machasher.hash_login_to_mac)
 
-    cmd_socket_uids = split_cfg_int_list(cfg.get('daemon',
-            'cmd_socket_uids'))
-    cmd_socket_gids = split_cfg_int_list(cfg.get('daemon',
-            'cmd_socket_gids'))
+    cmd_socket_uids = split_cfg_int_list(cfg_get_def(cfg, 'daemon',
+            'cmd_socket_uids', ''))
+    cmd_socket_gids = split_cfg_int_list(cfg_get_def(cfg, 'daemon',
+            'cmd_socket_gids', ''))
     def cmd_conn_auth_check(sock, pid, uid, gid):
         if uid in cmd_socket_uids:
             return True
@@ -308,9 +314,10 @@ def main():
             return True
         return False
 
-    cmd_socket_perms = int(cfg.get('daemon', 'cmd_socket_perms'), 8)
-    for unix_socket_fn in [u.strip() for u in \
-            cfg.get('daemon', 'cmd_sockets').split(',')]:
+    cmd_socket_perms = int(cfg_get_def(cfg, 'daemon', 'cmd_socket_perms',
+            '0666'), 8)
+    for unix_socket_fn in split_cfg_list(cfg_get_def(cfg, 'daemon',
+            'cmd_sockets', '')):
         cmd_listener = CommandConnectionListener(sloop=weakref.proxy(sloop),
                 socket_path=unix_socket_fn,
                 cmd_conn_factory=create_vpn_cmd_conn,
