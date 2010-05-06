@@ -151,23 +151,52 @@ class OpenVpnCmdConn(CommandConnection):
             self.log.exception('Adding a new DHCP request failed')
 
 class RealmData(object):
+    """A RealmData object contains all data relevant for a specific realm.
+    The attributes are injected at configuration-load-time.
+    """
     pass
 
+def cfg_get_def(cfg, sect, opt, default=None):
+    """Small helper to allow configuration options with program-defined
+    defaults."""
+    if cfg.has_option(sect, opt):
+        return cfg.get(sect, opt)
+    else:
+        return default
+
+def cfg_getint_def(cfg, sect, opt, default=None):
+    """Small helper to allow configuration options with program-defined
+    defaults."""
+    if cfg.has_option(sect, opt):
+        return cfg.getint(sect, opt)
+    else:
+        return default
+
 def read_realms(cfg):
+    """Read all realms from the configuration file into a dictionary of
+    RealmData objects.
+    """
     realms = {}
     for sect in [s for s in cfg.sections() if s.startswith('realm ')]:
         realm_name = sect[len('realm '):]
         realm_data = RealmData()
-        realm_data.dhcp_local_port = cfg.getint(sect, 'dhcp_local_port')
+        realms[realm_name] = realm_data
+
         realm_data.vid = cfg.getint(sect, 'vid')
-        realm_data.dhcp_listening_device = \
-                cfg.get(sect, 'dhcp_listening_device')
-        realm_data.dhcp_listening_ip = cfg.get(sect, 'dhcp_listening_ip')
+
+        realm_data.dhcp_local_port = cfg_getint_def(cfg, sect,
+                'dhcp_local_port', 67)
+
+        realm_data.dhcp_listening_device = cfg_get_def(cfg, sect,
+                'dhcp_listening_device')
+        realm_data.dhcp_listening_ip = cfg_get_def(cfg, sect,
+                'dhcp_listening_ip')
+
         realm_data.dhcp_server_ips = [i.strip() for i in \
                 cfg.get(sect, 'dhcp_server_ips').split(',')]
+
         realm_data.expected_dhcp_lease_time = \
                 cfg.getint(sect, 'expected_dhcp_lease_time')
-        realms[realm_name] = realm_data
     return realms
 
 def drop_caps(user=None, group=None, caps=[]):
