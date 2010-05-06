@@ -151,23 +151,73 @@ class OpenVpnCmdConn(CommandConnection):
             self.log.exception('Adding a new DHCP request failed')
 
 class RealmData(object):
+    """A RealmData object contains all data relevant for a specific realm.
+    The attributes are injected at configuration-load-time.
+    """
     pass
 
+def cfg_get_def(cfg, sect, opt, default=None):
+    """Small helper to allow configuration options with program-defined
+    defaults."""
+    if cfg.has_option(sect, opt):
+        return cfg.get(sect, opt)
+    else:
+        return default
+
+def cfg_getint_def(cfg, sect, opt, default=None):
+    """Small helper to allow configuration options with program-defined
+    defaults."""
+    if cfg.has_option(sect, opt):
+        return cfg.getint(sect, opt)
+    else:
+        return default
+
+def get_ip_for_iface(iface):
+    """Look up an IPv4 address on the given interface.
+    @param iface: Interface name
+    @return: Returns the IPv4 address as string.
+    """
+    import netifaces
+    addrs = netifaces.ifaddresses(iface)
+    if netifaces.AF_INET not in addrs or \
+            len(addrs[netifaces.AF_INET]) == 0 or \
+            'addr' not in addrs[netifaces.AF_INET][0]:
+        raise RuntimeError('Could not detect IPv4 address on interface "%s"' % \
+                iface)
+    return addrs[netifaces.AF_INET][0]['addr']
+
 def read_realms(cfg):
+    """Read all realms from the configuration file into a dictionary of
+    RealmData objects.
+    """
     realms = {}
     for sect in [s for s in cfg.sections() if s.startswith('realm ')]:
         realm_name = sect[len('realm '):]
         realm_data = RealmData()
-        realm_data.dhcp_local_port = cfg.getint(sect, 'dhcp_local_port')
+        realms[realm_name] = realm_data
+
         realm_data.vid = cfg.getint(sect, 'vid')
-        realm_data.dhcp_listening_device = \
-                cfg.get(sect, 'dhcp_listening_device')
-        realm_data.dhcp_listening_ip = cfg.get(sect, 'dhcp_listening_ip')
+
+        realm_data.dhcp_local_port = cfg_getint_def(cfg, sect,
+                'dhcp_local_port', 67)
+
+        realm_data.dhcp_listening_device = cfg_get_def(cfg, sect,
+                'dhcp_listening_device')
+        realm_data.dhcp_listening_ip = cfg_get_def(cfg, sect,
+                'dhcp_listening_ip')
+
+        if realm_data.dhcp_listening_device is not None and \
+                realm_data.dhcp_listening_ip is None:
+            # We need to determine an IPv4 address on the specified network
+            # device.
+            realm_data.dhcp_listening_ip = \
+                    get_ip_for_iface(realm_data.dhcp_listening_device)
+
         realm_data.dhcp_server_ips = [i.strip() for i in \
                 cfg.get(sect, 'dhcp_server_ips').split(',')]
+
         realm_data.expected_dhcp_lease_time = \
                 cfg.getint(sect, 'expected_dhcp_lease_time')
-        realms[realm_name] = realm_data
     return realms
 
 def drop_caps(user=None, group=None, caps=[]):
@@ -196,19 +246,25 @@ def drop_caps(user=None, group=None, caps=[]):
         logging.debug('Switching to user %s' % user)
         os.setuid(pwd.getpwnam(user).pw_uid)
 
-    # Some capabilities might be permitted but not effective, so explicitly
-    # set them to effective here.
-    logging.debug('Restricting to capabilities "%s"' % ', '.join(caps))
-    for cap in caps:
-        setattr(prctl.cap_effective, cap, True)
+    if len(caps) > 0:
+        logging.debug('Restricting to capabilities "%s"' % ', '.join(caps))
+        # Some capabilities might be permitted but not effective, so explicitly
+        # set them to effective here.
+        for cap in caps:
+            setattr(prctl.cap_effective, cap, True)
+    else:
+        logging.debug('Dropping all capabilities.')
     # Drop all capabilities except those listed in "caps".
     prctl.cap_effective.limit(*caps)
     prctl.cap_permitted.limit(*caps)
     # Child processes may not use our capabilities.
     prctl.cap_inheritable.limit()
 
+def split_cfg_list(val):
+    return [v.strip() for v in val.split(',') if (len(v.strip()) > 0)]
+
 def split_cfg_int_list(val):
-    return [int(v.strip()) for v in val.split(',') if (len(v.strip()) > 0)]
+    return [int(v) for v in split_cfg_list(val)]
 
 def main():
     prctl.set_name('odrd')
@@ -237,8 +293,8 @@ def main():
     if not options.keep_user:
         # Capability net_raw is needed for binding to network devices.
         # Capability net_bind_service is needed for binding to the DHCP port.
-        drop_caps(user=cfg.get('daemon', 'user'),
-                group=cfg.get('daemon', 'group'),
+        drop_caps(user=cfg_get_def(cfg, 'daemon', 'user', None),
+                group=cfg_get_def(cfg, 'daemon', 'group', None),
                 caps=['net_raw', 'net_bind_service'])
 
     realms_data = read_realms(cfg)
@@ -268,10 +324,10 @@ def main():
                 add_request_clb=requestor_mgr.add_request,
                 full_username_to_mac_clb=odr.machasher.hash_login_to_mac)
 
-    cmd_socket_uids = split_cfg_int_list(cfg.get('daemon',
-            'cmd_socket_uids'))
-    cmd_socket_gids = split_cfg_int_list(cfg.get('daemon',
-            'cmd_socket_gids'))
+    cmd_socket_uids = split_cfg_int_list(cfg_get_def(cfg, 'daemon',
+            'cmd_socket_uids', ''))
+    cmd_socket_gids = split_cfg_int_list(cfg_get_def(cfg, 'daemon',
+            'cmd_socket_gids', ''))
     def cmd_conn_auth_check(sock, pid, uid, gid):
         if uid in cmd_socket_uids:
             return True
@@ -279,9 +335,10 @@ def main():
             return True
         return False
 
-    cmd_socket_perms = int(cfg.get('daemon', 'cmd_socket_perms'), 8)
-    for unix_socket_fn in [u.strip() for u in \
-            cfg.get('daemon', 'cmd_sockets').split(',')]:
+    cmd_socket_perms = int(cfg_get_def(cfg, 'daemon', 'cmd_socket_perms',
+            '0666'), 8)
+    for unix_socket_fn in split_cfg_list(cfg_get_def(cfg, 'daemon',
+            'cmd_sockets', '')):
         cmd_listener = CommandConnectionListener(sloop=weakref.proxy(sloop),
                 socket_path=unix_socket_fn,
                 cmd_conn_factory=create_vpn_cmd_conn,
