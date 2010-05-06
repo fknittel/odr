@@ -152,7 +152,7 @@ class DhcpAddressRequest(object):
             except:
                 pass
             else:
-                self.log.debug("Found server ip %s" % self._server_ips.str())
+                self.log.debug("Found server ips %s" % str(self._server_ips))
 
     def _send_packet(self, packet):
         """Method to initially send a packet.
