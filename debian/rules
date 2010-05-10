@@ -2,6 +2,12 @@
 %:
 	dh $@
 
+binary: build
+	dh binary --before dh_install
+	chmod a+x debian/sv/run debian/sv/log/run
+	dh_install
+	dh binary --after dh_install
+
 odr-git-build:
 	git buildpackage -us -uc \
 		--git-export-dir=../build-area \
