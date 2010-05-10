@@ -2,8 +2,9 @@ odr (0.6-1) fsmi-lenny; urgency=low
 
   * New upstream release:
     + Also allow username/groupname instead of only uid/gid in config file.
+  * Switch to source version 1.0
 
- -- Fabian Knittel <fabian.knittel@avona.com>  Mon, 10 May 2010 12:32:41 +0200
+ -- Fabian Knittel <fabian.knittel@avona.com>  Mon, 10 May 2010 12:34:21 +0200
 
 odr (0.5-1) local; urgency=low
 
