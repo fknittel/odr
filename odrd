@@ -24,6 +24,7 @@ import weakref
 import re
 import traceback
 import os
+import pwd
 import grp
 import signal
 import prctl
@@ -220,6 +221,28 @@ def read_realms(cfg):
                 cfg.getint(sect, 'expected_dhcp_lease_time')
     return realms
 
+def user_to_uid(user):
+    try:
+        uid = int(user)
+    except ValueError:
+        try:
+            uid = pwd.getpwnam(user).pw_uid
+        except KeyError:
+            logging.critical('could not resolve user "%s", exiting', user)
+            sys.exit(1)
+    return uid
+
+def group_to_gid(group):
+    try:
+        gid = int(group)
+    except ValueError:
+        try:
+            gid = grp.getgrnam(group).gr_gid
+        except KeyError:
+            logging.critical('could not resolve group "%s", exiting', group)
+            sys.exit(1)
+    return gid
+
 def drop_caps(user=None, group=None, caps=[]):
     """Switches aways from UID 0 and full capabilities to a different user
     and a limited set of capabilities.  Child processes get none of the
@@ -228,13 +251,10 @@ def drop_caps(user=None, group=None, caps=[]):
     @param group: The target group
     @param caps: List of capabilities to retain.
     """
-    import pwd
-    import grp
-
     if group is not None:
         # Switch to new GID.
-        logging.debug('Switching to group %s' % group)
-        gid = grp.getgrnam(group).gr_gid
+        logging.debug('Switching to group %s' % str(group))
+        gid = group_to_gid(group)
         os.setgid(gid)
         os.setgroups([gid])
 
@@ -243,8 +263,8 @@ def drop_caps(user=None, group=None, caps=[]):
         prctl.set_keepcaps(True)
 
         # Switch to new UID.
-        logging.debug('Switching to user %s' % user)
-        os.setuid(pwd.getpwnam(user).pw_uid)
+        logging.debug('Switching to user %s' % str(user))
+        os.setuid(user_to_uid(user))
 
     if len(caps) > 0:
         logging.debug('Restricting to capabilities "%s"' % ', '.join(caps))
@@ -263,8 +283,11 @@ def drop_caps(user=None, group=None, caps=[]):
 def split_cfg_list(val):
     return [v.strip() for v in val.split(',') if (len(v.strip()) > 0)]
 
-def split_cfg_int_list(val):
-    return [int(v) for v in split_cfg_list(val)]
+def users_to_uids(users):
+    return [user_to_uid(user) for user in users]
+
+def groups_to_gids(groups):
+    return [group_to_gid(group) for group in groups]
 
 def main():
     prctl.set_name('odrd')
@@ -324,10 +347,10 @@ def main():
                 add_request_clb=requestor_mgr.add_request,
                 full_username_to_mac_clb=odr.machasher.hash_login_to_mac)
 
-    cmd_socket_uids = split_cfg_int_list(cfg_get_def(cfg, 'daemon',
-            'cmd_socket_uids', ''))
-    cmd_socket_gids = split_cfg_int_list(cfg_get_def(cfg, 'daemon',
-            'cmd_socket_gids', ''))
+    cmd_socket_uids = users_to_uids(split_cfg_list(cfg_get_def(cfg, 'daemon',
+            'cmd_socket_uids', '')))
+    cmd_socket_gids = groups_to_gids(split_cfg_list(cfg_get_def(cfg, 'daemon',
+            'cmd_socket_gids', '')))
     def cmd_conn_auth_check(sock, pid, uid, gid):
         if uid in cmd_socket_uids:
             return True
