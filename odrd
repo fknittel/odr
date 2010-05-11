@@ -28,6 +28,7 @@ import pwd
 import grp
 import signal
 import prctl
+import socket
 from optparse import OptionParser
 from ConfigParser import SafeConfigParser
 
@@ -43,9 +44,9 @@ CONFIG_FILE = '/etc/odr.conf'
 class OpenVpnCmdConn(CommandConnection):
     USERNAME_RE = r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?@((?P<domain>[^/@]+)/)?(?P<realm>[^/@]+)$'
 
-    def __init__(self, sloop, socket, realms_data, add_request_clb,
+    def __init__(self, sloop, sock, realms_data, add_request_clb,
             full_username_to_mac_clb):
-        super(OpenVpnCmdConn, self).__init__(sloop, socket)
+        super(OpenVpnCmdConn, self).__init__(sloop, sock)
         self._realms_data = realms_data
         self._add_request = add_request_clb
         self._full_username_to_mac = full_username_to_mac_clb
@@ -214,7 +215,7 @@ def read_realms(cfg):
             realm_data.dhcp_listening_ip = \
                     get_ip_for_iface(realm_data.dhcp_listening_device)
 
-        realm_data.dhcp_server_ips = [i.strip() for i in \
+        realm_data.dhcp_server_ips = [socket.gethostbyname(i.strip()) for i in \
                 cfg.get(sect, 'dhcp_server_ips').split(',')]
 
         realm_data.expected_dhcp_lease_time = \
