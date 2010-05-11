@@ -88,10 +88,10 @@ class CommandConnection(object):
         child class' handle_cmd method.
         @param cmd_line: The command line string to parse.
         """
-        self.log.debug('parsing command "%s"' % cmd_line)
+        self.log.debug('parsing command "%s"' % repr(cmd_line))
         cmd, params = unpack_cmd(cmd_line)
         if cmd is None:
-            self.log.warning('failed to parse command "%s"' % cmd_line)
+            self.log.warning('failed to parse command "%s"' % repr(cmd_line))
             return
         self.handle_cmd(cmd, params, files)
 
