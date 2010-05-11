@@ -42,11 +42,12 @@ import odr.dhcprequestor
 CONFIG_FILE = '/etc/odr.conf'
 
 class OpenVpnCmdConn(CommandConnection):
-    USERNAME_RE = r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?@((?P<domain>[^/@]+)/)?(?P<realm>[^/@]+)$'
+    USERNAME_RE = re.compile(r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?(@((?P<domain>[^/@]+)/)?(?P<realm>[^/@]+))?$')
 
-    def __init__(self, sloop, sock, realms_data, add_request_clb,
+    def __init__(self, sloop, sock, default_realm, realms_data, add_request_clb,
             full_username_to_mac_clb):
         super(OpenVpnCmdConn, self).__init__(sloop, sock)
+        self._default_realm = default_realm
         self._realms_data = realms_data
         self._add_request = add_request_clb
         self._full_username_to_mac = full_username_to_mac_clb
@@ -122,13 +123,23 @@ class OpenVpnCmdConn(CommandConnection):
                     e.args)
             return
 
-        m = re.match(self.USERNAME_RE, self._full_username)
+        m = self.USERNAME_RE.match(self._full_username)
         if m is None:
             self.send_cmd('FAIL')
             self.log.warning('username in unexpected format: "%s"' % \
                     self._full_username)
             return
         self._realm = m.group('realm')
+
+        if self._realm is None:
+            if self._default_realm is None:
+                self.send_cmd('FAIL')
+                self.log.warning('username contains no realm: "%s"' % \
+                        self._full_username)
+                return
+            self.log.debug('no realm specified, using default realm "%s"' % \
+                    self._default_realm)
+            self._realm = self._default_realm
 
         if self._realm not in self._realms_data:
             self.send_cmd('FAIL')
@@ -345,6 +356,7 @@ def main():
 
     def create_vpn_cmd_conn(sloop, sock):
         return OpenVpnCmdConn(sloop, sock,
+                default_realm=cfg_get_def(cfg, 'daemon', 'default_realm'),
                 realms_data=realms_data,
                 add_request_clb=requestor_mgr.add_request,
                 full_username_to_mac_clb=odr.machasher.hash_login_to_mac)
