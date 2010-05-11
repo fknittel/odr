@@ -81,7 +81,8 @@ class OpenVpnCmdConn(CommandConnection):
         self._config_f.seek(0)
         self._config_f.write('ifconfig-push %s %s\n' % (res['ip-address'],
                 res['subnet-mask']))
-        self._config_f.write('vlan-pvid %d\n' % self._realm_data.vid)
+        if self._realm_data.vid is not None:
+            self._config_f.write('vlan-pvid %d\n' % self._realm_data.vid)
         self._config_f.write('push "ip-win32 dynamic"\n')
         self._config_f.write('push "route-gateway %s"\n' % (res['gateway']))
         self._config_f.write('push "redirect-gateway def1"\n')
@@ -198,7 +199,7 @@ def read_realms(cfg):
         realm_data = RealmData()
         realms[realm_name] = realm_data
 
-        realm_data.vid = cfg.getint(sect, 'vid')
+        realm_data.vid = cfg_getint_def(cfg, sect, 'vid')
 
         realm_data.dhcp_local_port = cfg_getint_def(cfg, sect,
                 'dhcp_local_port', 67)
