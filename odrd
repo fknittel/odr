@@ -41,16 +41,43 @@ import odr.dhcprequestor
 
 CONFIG_FILE = '/etc/odr.conf'
 
-class OpenVpnCmdConn(CommandConnection):
+class ParseUsername(object):
     USERNAME_RE = re.compile(r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?(@((?P<domain>[^/@]+)/)?(?P<realm>[^/@]+))?$')
 
-    def __init__(self, sloop, sock, default_realm, realms_data, add_request_clb,
-            full_username_to_mac_clb):
-        super(OpenVpnCmdConn, self).__init__(sloop, sock)
+    def __init__(self, default_realm):
         self._default_realm = default_realm
+        self.log = logging.getLogger('parseusername')
+
+    def parse_username(self, full_username):
+        m = self.USERNAME_RE.match(full_username)
+        if m is None:
+            self.log.warning('username in unexpected format: "%s"' % \
+                    full_username)
+            return None
+        realm = m.group('realm')
+
+        if realm is None:
+            if self._default_realm is None:
+                self.log.warning('username contains no realm: "%s"' % \
+                        full_username)
+                return None
+            self.log.debug('no realm specified, using default realm "%s"' % \
+                    self._default_realm)
+            realm = self._default_realm
+
+        return {'username':m.group('username'),
+                'resource':m.group('resource'),
+                'domain':m.group('domain'),
+                'realm':realm}
+
+class OpenVpnCmdConn(CommandConnection):
+    def __init__(self, sloop, sock, realms_data, add_request_clb,
+            full_username_to_mac_clb, parse_username_clb):
+        super(OpenVpnCmdConn, self).__init__(sloop, sock)
         self._realms_data = realms_data
         self._add_request = add_request_clb
         self._full_username_to_mac = full_username_to_mac_clb
+        self._parse_username = parse_username_clb
         self._ret_f = None
         self._wrote_ret = False
         self._config_f = None
@@ -123,29 +150,19 @@ class OpenVpnCmdConn(CommandConnection):
                     e.args)
             return
 
-        m = self.USERNAME_RE.match(self._full_username)
-        if m is None:
+        ret = self._parse_username(self._full_username)
+        if ret is None:
             self.send_cmd('FAIL')
-            self.log.warning('username in unexpected format: "%s"' % \
+            self.log.warning('parsing username failed: "%s"' % \
                     self._full_username)
             return
-        self._realm = m.group('realm')
+        realm = ret['realm']
 
-        if self._realm is None:
-            if self._default_realm is None:
-                self.send_cmd('FAIL')
-                self.log.warning('username contains no realm: "%s"' % \
-                        self._full_username)
-                return
-            self.log.debug('no realm specified, using default realm "%s"' % \
-                    self._default_realm)
-            self._realm = self._default_realm
-
-        if self._realm not in self._realms_data:
+        if realm not in self._realms_data:
             self.send_cmd('FAIL')
-            logging.error('Unknown realm %s.' % self._realm)
+            logging.error('Unknown realm %s.' % realm)
             return
-        self._realm_data = self._realms_data[self._realm]
+        self._realm_data = self._realms_data[realm]
 
         self.send_cmd('OK')
         self._ret_f = ret_f
@@ -354,12 +371,15 @@ def main():
     requestor_mgr = odr.dhcprequestor.DhcpAddressRequestorManager(
             request_factory=create_dhcp_address_request)
 
+    parse_username = ParseUsername(
+            default_realm=cfg_get_def(cfg, 'daemon', 'default_realm'))
+
     def create_vpn_cmd_conn(sloop, sock):
         return OpenVpnCmdConn(sloop, sock,
-                default_realm=cfg_get_def(cfg, 'daemon', 'default_realm'),
                 realms_data=realms_data,
                 add_request_clb=requestor_mgr.add_request,
-                full_username_to_mac_clb=odr.machasher.hash_login_to_mac)
+                full_username_to_mac_clb=odr.machasher.hash_login_to_mac,
+                parse_username_clb=parse_username.parse_username)
 
     cmd_socket_uids = users_to_uids(split_cfg_list(cfg_get_def(cfg, 'daemon',
             'cmd_socket_uids', '')))
