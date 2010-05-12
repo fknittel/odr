@@ -28,6 +28,7 @@ import pwd
 import grp
 import signal
 import prctl
+import socket
 from optparse import OptionParser
 from ConfigParser import SafeConfigParser
 
@@ -40,15 +41,43 @@ import odr.dhcprequestor
 
 CONFIG_FILE = '/etc/odr.conf'
 
-class OpenVpnCmdConn(CommandConnection):
-    USERNAME_RE = r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?@((?P<domain>[^/@]+)/)?(?P<realm>[^/@]+)$'
+class ParseUsername(object):
+    USERNAME_RE = re.compile(r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?(@((?P<domain>[^/@]+)/)?(?P<realm>[^/@]+))?$')
 
-    def __init__(self, sloop, socket, realms_data, add_request_clb,
-            full_username_to_mac_clb):
-        super(OpenVpnCmdConn, self).__init__(sloop, socket)
+    def __init__(self, default_realm):
+        self._default_realm = default_realm
+        self.log = logging.getLogger('parseusername')
+
+    def parse_username(self, full_username):
+        m = self.USERNAME_RE.match(full_username)
+        if m is None:
+            self.log.warning('username in unexpected format: "%s"' % \
+                    full_username)
+            return None
+        realm = m.group('realm')
+
+        if realm is None:
+            if self._default_realm is None:
+                self.log.warning('username contains no realm: "%s"' % \
+                        full_username)
+                return None
+            self.log.debug('no realm specified, using default realm "%s"' % \
+                    self._default_realm)
+            realm = self._default_realm
+
+        return {'username':m.group('username'),
+                'resource':m.group('resource'),
+                'domain':m.group('domain'),
+                'realm':realm}
+
+class OpenVpnCmdConn(CommandConnection):
+    def __init__(self, sloop, sock, realms_data, add_request_clb,
+            full_username_to_mac_clb, parse_username_clb):
+        super(OpenVpnCmdConn, self).__init__(sloop, sock)
         self._realms_data = realms_data
         self._add_request = add_request_clb
         self._full_username_to_mac = full_username_to_mac_clb
+        self._parse_username = parse_username_clb
         self._ret_f = None
         self._wrote_ret = False
         self._config_f = None
@@ -80,7 +109,8 @@ class OpenVpnCmdConn(CommandConnection):
         self._config_f.seek(0)
         self._config_f.write('ifconfig-push %s %s\n' % (res['ip-address'],
                 res['subnet-mask']))
-        self._config_f.write('vlan-pvid %d\n' % self._realm_data.vid)
+        if self._realm_data.vid is not None:
+            self._config_f.write('vlan-pvid %d\n' % self._realm_data.vid)
         self._config_f.write('push "ip-win32 dynamic"\n')
         self._config_f.write('push "route-gateway %s"\n' % (res['gateway']))
         self._config_f.write('push "redirect-gateway def1"\n')
@@ -120,19 +150,19 @@ class OpenVpnCmdConn(CommandConnection):
                     e.args)
             return
 
-        m = re.match(self.USERNAME_RE, self._full_username)
-        if m is None:
+        ret = self._parse_username(self._full_username)
+        if ret is None:
             self.send_cmd('FAIL')
-            self.log.warning('username in unexpected format: "%s"' % \
+            self.log.warning('parsing username failed: "%s"' % \
                     self._full_username)
             return
-        self._realm = m.group('realm')
+        realm = ret['realm']
 
-        if self._realm not in self._realms_data:
+        if realm not in self._realms_data:
             self.send_cmd('FAIL')
-            logging.error('Unknown realm %s.' % self._realm)
+            logging.error('Unknown realm %s.' % realm)
             return
-        self._realm_data = self._realms_data[self._realm]
+        self._realm_data = self._realms_data[realm]
 
         self.send_cmd('OK')
         self._ret_f = ret_f
@@ -197,7 +227,7 @@ def read_realms(cfg):
         realm_data = RealmData()
         realms[realm_name] = realm_data
 
-        realm_data.vid = cfg.getint(sect, 'vid')
+        realm_data.vid = cfg_getint_def(cfg, sect, 'vid')
 
         realm_data.dhcp_local_port = cfg_getint_def(cfg, sect,
                 'dhcp_local_port', 67)
@@ -214,7 +244,7 @@ def read_realms(cfg):
             realm_data.dhcp_listening_ip = \
                     get_ip_for_iface(realm_data.dhcp_listening_device)
 
-        realm_data.dhcp_server_ips = [i.strip() for i in \
+        realm_data.dhcp_server_ips = [socket.gethostbyname(i.strip()) for i in \
                 cfg.get(sect, 'dhcp_server_ips').split(',')]
 
         realm_data.expected_dhcp_lease_time = \
@@ -341,11 +371,15 @@ def main():
     requestor_mgr = odr.dhcprequestor.DhcpAddressRequestorManager(
             request_factory=create_dhcp_address_request)
 
+    parse_username = ParseUsername(
+            default_realm=cfg_get_def(cfg, 'daemon', 'default_realm'))
+
     def create_vpn_cmd_conn(sloop, sock):
         return OpenVpnCmdConn(sloop, sock,
                 realms_data=realms_data,
                 add_request_clb=requestor_mgr.add_request,
-                full_username_to_mac_clb=odr.machasher.hash_login_to_mac)
+                full_username_to_mac_clb=odr.machasher.hash_login_to_mac,
+                parse_username_clb=parse_username.parse_username)
 
     cmd_socket_uids = users_to_uids(split_cfg_list(cfg_get_def(cfg, 'daemon',
             'cmd_socket_uids', '')))
