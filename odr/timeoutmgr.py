@@ -21,6 +21,15 @@ import time
 import logging
 
 
+class TimeoutObject(object):
+    def __init__(self, timeout_time, timeout_func):
+        self.timeout_time = timeout_time
+        self._timeout_func = timeout_func
+
+    def handle_timeout(self):
+        self._timeout_func()
+
+
 class TimeoutManager(object):
     """The TimeoutManager keeps track of objects that have a timeout time set.
     As soon as a timeout occurs, the affected objects are notified.
@@ -31,6 +40,30 @@ class TimeoutManager(object):
     def __init__(self):
         self._timeout_objects = []
         self.log = logging.getLogger('timeoutmgr')
+
+    def add_rel_timeout(self, timeout_secs, timeout_func):
+        """Adds a timeout event for a specific time.  On timeout, the function
+        timeout_func is called.
+
+        @param timeout_secs: Absolute time at which the timeout shall occur.
+        @param timeout_func: Function that will be called on timeout.
+        @return: Returns a timeout object that can be used to remove the
+                timeout event before the actual timeout.
+        """
+        return self.add_abs_timeout(time.time() + timeout_secs, timeout_func)
+
+    def add_abs_timeout(self, timeout_time, timeout_func):
+        """Adds a timeout event for a specific time.  On timeout, the function
+        timeout_func is called.
+
+        @param timeout_time: Absolute time at which the timeout shall occur.
+        @param timeout_func: Function that will be called on timeout.
+        @return: Returns a timeout object that can be used to remove the
+                timeout event before the actual timeout.
+        """
+        obj = TimeoutObject(timeout_time, timeout_func)
+        self.add_timeout_object(obj)
+        return obj
 
     def add_timeout_object(self, timeout_object):
         """Adds a timeout object.  The timeout object must provide the timeout

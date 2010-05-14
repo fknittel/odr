@@ -72,6 +72,173 @@ class ParseUsername(object):
                 'domain':m.group('domain'),
                 'realm':realm}
 
+
+class OvpnClient(object):
+    """Represents an OpenVPN client connected to a specific OpenVPN server
+    instance.
+    """
+    __slots__ = ['__weakref__', 'full_username', 'leased_ip_address',
+            'server', 'lease_time', 'last_refreshed']
+
+    def __init__(self, timeout_mgr, **kwargs):
+        self._timeout_mgr = timeout_mgr
+        self.full_username = kwargs.get('full_username', None)
+        self._leased_ip_address = kwargs.get('leased_ip_address', None)
+        self._lease_time = kwargs.get('lease_time', None)
+        self._last_refreshed = kwargs.get('last_refreshed', None)
+        self.server = kwargs.get('server', None)
+
+        self._active = True
+        self._timeout_mgr.add_timeout_object(self)
+
+    def __str__(self):
+        return '%s on %s' % (self.full_username, self.server)
+
+    def __repr__(self):
+        return "<OvpnClient(common_name=%s, server=%s, ...)>" % (
+                self.full_username, self.server)
+
+    def set_inactive(self):
+        """Disable the client.  Although any pending activities will continue,
+        no new activities will be started.
+        """
+        self._active = False
+
+    @property
+    def timeout_time(self):
+        return self._last_refreshed + 0.5 * self._lease_time
+
+    def handle_timeout(self):
+        if not self._active:
+            # No longer active, no further timeout handling necessary.  This
+            # implicitly removes the last reference to this object, which should
+            # cause it to be collected.
+            return
+
+        # TODO: Refresh the DHCP lease.
+        # TODO: In case of failure, call self.server.disconnect_client(self)
+        if False:
+            self.server.disconnect_client(self)
+        # TODO: In case of success and unless self._active is False, add a new
+        # timeout.
+        if self._active:
+            self.last_refreshed = time.time()
+            # TODO: Retrieve lease time from DHCP ACK.
+            self.lease_time = 0
+            self._timeout_mgr.add_timeout_object(self)
+
+
+class OvpnClientManager(object):
+    """Manages a list of all clients currently connected to all known OpenVPN
+    servers.  Takes care of regularly refreshing the client's DHCP leases.
+
+    Periodically polls the OpenVPN servers to sync the list of connected
+    clients.
+    """
+    def __init__(self, timeout_mgr, servers, sync_interval=60):
+        """\
+        @param timeout_mgr: Reference to a timeout manager.
+        @param servers: List of OpenVPN servers to query.
+        @param sync_interval: Intervall in which to poll the servers.
+        """
+        self._timeout_mgr = timeout_mgr
+        self._servers = servers
+        self._sync_interval = sync_interval
+
+        self.log = logging.getLogger('ovpnclientmgr')
+        self._clients_by_username = {}
+
+        self._clients_by_server = {}
+        for server in self._servers:
+            self._clients_by_server[server] = {}
+
+        self._timeout_mgr.add_rel_timeout(0, WeakBoundMethod(
+                self._on_sync_clients))
+
+    def add_client(self, client):
+        """Add a client, based on a completed and successful DHCP request.
+        """
+        if client.full_username in self._clients_by_username:
+            self.log.info('replacing client connection in client list with' \
+                    'freshly connected client instance: %s' % client)
+            self._del_client(self._clients_by_username[client.full_username])
+        else:
+            self.log.debug('adding new client instance: %s' % client)
+
+        self._clients_by_username[client.full_username] = client
+        self._clients_by_server[client.server] = client
+
+    def sync_clients(self):
+        """Syncs the client list with the client lists of each OpenVPN server.
+
+        Any client connected to the server but not listed by us needs to be
+        added to our client list.  Those client's leases need to be refreshed
+        soon, as their last refresh time is unknown to us.
+
+        Any clients that are listed by us but no longer listed by the OpenVPN
+        server are removed from our list.  They have been disconnected.
+        """
+        for server in self._servers:
+            # Asynchronously retrieve the list of clients against which to sync.
+            server.poll_client_list(lambda client_data_list: \
+                    self._sync_clients_with(client_data_list, server))
+
+    def _on_sync_clients(self):
+        """Timeout event handler to regularly sync clients.  See sync_clients().
+        """
+        self.sync_clients()
+        self._timeout_mgr.add_rel_timeout(self._sync_intervall,
+                WeakBoundMethod(self._on_sync_clients))
+
+    def _sync_clients_with(self, client_data_list, server):
+        """Called per-server as soon as the server's client data list has
+        been retrieved.  Performs the actual processing as documented for
+        sync_clients().
+        """
+        if client_data_list is None:
+            self.log.error('syncing the client list with server %s failed' % \
+                    server)
+            return
+
+        client_data_by_username = {}
+
+        for client_data in client_data_list:
+            client_data_by_username[client_data.common_name] = client_data
+
+            if client_data.common_name in self._clients_by_username:
+                client = self._clients_by_username[client_data.common_name]
+                if client.server != server:
+                    # The client has jumped servers.  Remove it from the list.
+                    self._del_client(client)
+
+            if client_data.common_name not in self._clients_by_username:
+                # New client!  Assume pessimistic last lease update time.  We're
+                # probably recovering from a daemon restart.
+                self._add_detected_client(client_data, server)
+
+        for client in self._clients_by_server[server].keys():
+            if client.full_username not in client_data_by_username:
+                # The client has been disconnected.
+                self._del_client(client)
+
+    def _del_client(self, client):
+        client.set_disabled()
+        del self._clients_by_username[client.full_username]
+        del self._clients_by_server[client.server][client.full_username]
+
+    def _create_detected_client(self, client_data, server):
+        """Create a client instance based off of client data retrieved from an
+        OpenVPN server.  As we have no knowledge of the last DHCP lease refresh
+        time, the client's next lease update time is set to "soon".
+        """
+        client = OvpnClient(server=server,
+                full_username=client_data.common_name,
+                leased_ip_address=client_data.virtual_address,
+                lease_time=0,
+                last_refreshed=0)
+        self.add_client(client)
+
+
 class OpenVpnCmdConn(CommandConnection):
     def __init__(self, sloop, sock, realms_data, add_request_clb,
             full_username_to_mac_clb, parse_username_clb):
