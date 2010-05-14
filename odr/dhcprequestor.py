@@ -133,7 +133,7 @@ class DhcpAddressRequest(object):
         packet = DhcpPacket()
         packet.AddLine("op: BOOTREQUEST")
         packet.AddLine("dhcp_message_type: DHCP_REQUEST")
-        for opt in ["htype", "hlen", "xid", "flags", "yiaddr", "siaddr",
+        for opt in ["htype", "hlen", "xid", "flags", "siaddr",
                 "giaddr", "chaddr", "server_identifier"]:
             packet.SetOption(opt, offer_packet.GetOption(opt))
         packet.SetOption("request_ip_address", offer_packet.GetOption("yiaddr"))
