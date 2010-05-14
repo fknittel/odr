@@ -1,0 +1,31 @@
+Planned features / unsolved issues / wishlist items
+
+* Allow an OpenVPN tunnel to provide only partial routing, instead of always
+  providing the default route.
+  + Request DHCP rfc3442-classless-static-routes and convert to matching
+    push requests.
+  + Per-realm flag whether or not to push the default route.
+  + Pass full_username on to DHCP server as client-identifer, allowing the
+    DHCP server to send static routes depending on the full_username.
+
+* Refresh DHCP leases.
+  + Remember granted leases, refresh in time.
+  + Track client connection list and disconnect events.  Prevents refreshing
+    leases from clients that are no longer connected.
+  + Boot-strap the list of granted leases by reading all client connection
+    lists and assuming that the next lease refresh is due soon.  (Alternatively,
+    odrd would need to maintain a database.)
+
+* Try to implement some mechanism to determine if an IP address is already in
+  use (especially by non-OpenVPN users).
+  + Use ARP resolve / ARP ping to determine whether an IP address is in use.
+  + Communicate with other odr instances to determine whether the
+    full_username is known as an active client to someone.
+  + If IP active, but full_username unknown to odr instances -> non-OpenVPN
+    user using the address -> request a different address.
+    Otherwise the same full_username is active on several instances -> kill
+    it on the older instance.
+
+* Release DHCP leases on coordinated disconnect.
+  + Probably not possible, because there's no such thing as a coordinated
+    disconnect in OpenVPN.
