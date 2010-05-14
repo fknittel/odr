@@ -39,8 +39,10 @@ from odr.timeoutmgr import TimeoutManager
 from odr.socketloop import SocketLoop
 import odr.dhcprequestor
 
+
 CONFIG_FILE = '/etc/odr.conf'
 
+
 class ParseUsername(object):
     USERNAME_RE = re.compile(r'^(?P<username>[^/@]+)(/(?P<resource>[^/@]+))?(@((?P<domain>[^/@]+)/)?(?P<realm>[^/@]+))?$')
 
@@ -181,12 +183,7 @@ class OpenVpnCmdConn(CommandConnection):
         except:
             self.log.exception('Adding a new DHCP request failed')
 
-class RealmData(object):
-    """A RealmData object contains all data relevant for a specific realm.
-    The attributes are injected at configuration-load-time.
-    """
-    pass
-
+
 def cfg_get_def(cfg, sect, opt, default=None):
     """Small helper to allow configuration options with program-defined
     defaults."""
@@ -203,6 +200,38 @@ def cfg_getint_def(cfg, sect, opt, default=None):
     else:
         return default
 
+def split_cfg_list(val):
+    return [v.strip() for v in val.split(',') if (len(v.strip()) > 0)]
+
+def user_to_uid(user):
+    try:
+        uid = int(user)
+    except ValueError:
+        try:
+            uid = pwd.getpwnam(user).pw_uid
+        except KeyError:
+            logging.critical('could not resolve user "%s", exiting', user)
+            sys.exit(1)
+    return uid
+
+def group_to_gid(group):
+    try:
+        gid = int(group)
+    except ValueError:
+        try:
+            gid = grp.getgrnam(group).gr_gid
+        except KeyError:
+            logging.critical('could not resolve group "%s", exiting', group)
+            sys.exit(1)
+    return gid
+
+def users_to_uids(users):
+    return [user_to_uid(user) for user in users]
+
+def groups_to_gids(groups):
+    return [group_to_gid(group) for group in groups]
+
+
 def get_ip_for_iface(iface):
     """Look up an IPv4 address on the given interface.
     @param iface: Interface name
@@ -217,6 +246,14 @@ def get_ip_for_iface(iface):
                 iface)
     return addrs[netifaces.AF_INET][0]['addr']
 
+
+class RealmData(object):
+    """A RealmData object contains all data relevant for a specific realm.
+    The attributes are injected at configuration-load-time.
+    """
+    pass
+
+
 def read_realms(cfg):
     """Read all realms from the configuration file into a dictionary of
     RealmData objects.
@@ -251,28 +288,7 @@ def read_realms(cfg):
                 cfg.getint(sect, 'expected_dhcp_lease_time')
     return realms
 
-def user_to_uid(user):
-    try:
-        uid = int(user)
-    except ValueError:
-        try:
-            uid = pwd.getpwnam(user).pw_uid
-        except KeyError:
-            logging.critical('could not resolve user "%s", exiting', user)
-            sys.exit(1)
-    return uid
-
-def group_to_gid(group):
-    try:
-        gid = int(group)
-    except ValueError:
-        try:
-            gid = grp.getgrnam(group).gr_gid
-        except KeyError:
-            logging.critical('could not resolve group "%s", exiting', group)
-            sys.exit(1)
-    return gid
-
+
 def drop_caps(user=None, group=None, caps=[]):
     """Switches aways from UID 0 and full capabilities to a different user
     and a limited set of capabilities.  Child processes get none of the
@@ -310,15 +326,7 @@ def drop_caps(user=None, group=None, caps=[]):
     # Child processes may not use our capabilities.
     prctl.cap_inheritable.limit()
 
-def split_cfg_list(val):
-    return [v.strip() for v in val.split(',') if (len(v.strip()) > 0)]
-
-def users_to_uids(users):
-    return [user_to_uid(user) for user in users]
-
-def groups_to_gids(groups):
-    return [group_to_gid(group) for group in groups]
-
+
 def main():
     prctl.set_name('odrd')
     prctl.set_proctitle(' '.join(sys.argv))
