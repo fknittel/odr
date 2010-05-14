@@ -29,3 +29,7 @@ Planned features / unsolved issues / wishlist items
 * Release DHCP leases on coordinated disconnect.
   + Probably not possible, because there's no such thing as a coordinated
     disconnect in OpenVPN.
+
+* Can DHCP's CHADDR field be left empty if a client-identifier is used?
+  This would avoid the need for full_username -> MAC address hashing and avoid
+  any potential for collisions.
