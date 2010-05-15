@@ -72,6 +72,7 @@ class CommandConnection(object):
         """
         self._sloop = sloop
         self._socket = socket
+        self._sloop.add_socket_handler(self._socket)
 
     def __del__(self):
         self.log.debug('destructing CommandConnection')
@@ -203,7 +204,6 @@ class CommandConnectionListener(object):
                 sock.close()
                 return
         conn = self._factory(sloop=self._sloop, sock=sock)
-        self._sloop.add_socket_handler(conn)
 
 
 def getsockpeercred(sock):
