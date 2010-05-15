@@ -59,31 +59,41 @@ class OvpnClientConnData(object):
 
 
 class OvpnServer(object):
-    def __init__(self, name, mgmt_sock_file, sloop):
-        self._name = name
-        self._mgmt_sock_file = mgmt_sock_file
+    def __init__(self, sloop, mgmt_sock_file):
         self._sloop = sloop
+        self._sock_fn = mgmt_sock_file
 
+        self.log = logging.getLogger('ovpnsrv')
+
+        self.log.debug('connecting to OpenVPN server at "%s"' % self._sock_fn)
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.connect(self._mgmt_sock_file)
+        sock.connect(self._sock_fn)
         self._socket = LineSocket(sock)
 
         self._idle_state = _OvpnIdleState()
         self._state_queue = Queue()
         self._state = self._idle_state
 
+        self._add_state(_OvpnWaitConnectState(self, self._on_connected))
+        self._sloop.add_socket_handler(self)
+
+    def _on_connected(self, hello_msg):
+        if not hello_msg.startswith('>INFO:'):
+            self.log.error('connection to "%s" failed: "%s"' % (
+                    self._sock_fn, hello_msg))
+            self._sloop.del_socket_handler(self)
+            # TODO: Attempt to re-establish the connection.
+            return
+        self.log.debug('connected to OpenVPN at "%s"' % self._sock_fn)
+
     def __del__(self):
         self._socket.close()
 
     def __eq__(self, other):
-        return self._name == other._name
-
-    @property
-    def name(self):
-        return self._name
+        return self._sock_fn == other._sock_fn
 
     def __str__(self):
-        return self.name
+        return self._sock_fn
 
     @property
     def socket(self):
@@ -95,7 +105,10 @@ class OvpnServer(object):
         lines = self._socket.recvlines()
         if lines is None:
             # EOF - clean-up.
+            self.log.error('received EOF on socket for OpenVPN at "%s"' % \
+                    self._sock_fn)
             self._sloop.del_socket_handler(self)
+            # TODO: Attempt to re-establish the connection.
             return
 
         for line in lines:
@@ -117,13 +130,16 @@ class OvpnServer(object):
             self._state = new_state
         self._state_queue.put(new_state)
 
-    def disconnect_client(self, client):
+    def disconnect_client(self, common_name):
         """Disconnects the specified client from this OpenVPN server instance.
 
-        @param client: OvpnClient instance representing the client that should
-                be disconnected.
+        @param common_name: Common name of the client that should be
+                disconnected.
         """
-        self._add_state(_OvpnDisconnectClientsState(self, lambda res:None))
+        self.log.debug('disconnecting client %s from OpenVPN server at "%s"' % \
+                (common_name, self._sock_fn))
+        self._add_state(_OvpnDisconnectClientsState(self, common_name,
+                lambda res:None))
 
     def poll_client_list(self, list_done_clb):
         """Polls the list of clients connected to this server.  On completion,
@@ -133,6 +149,8 @@ class OvpnServer(object):
         @param: list_done_clb The callback function to call on completion or
                 error.
         """
+        self.log.debug('polling user list from OpenVPN server at "%s"' % \
+                self._sock_fn)
         self._add_state(_OvpnListClientsState(self, list_done_clb))
 
 
@@ -148,6 +166,18 @@ class _OvpnIdleState(_OvpnStateInterface):
     """
     def handle_line(self, line):
         return True
+
+
+class _OvpnWaitConnectState(_OvpnStateInterface):
+    """Waits for an OpenVPN management socket to to connect.
+    """
+
+    def __init__(self, ovpn, done_clb):
+        self._done = done_clb
+
+    def handle_line(self, line):
+        self._done(line)
+        return False
 
 
 class _OvpnListClientsState(_OvpnStateInterface):

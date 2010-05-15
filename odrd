@@ -501,6 +501,18 @@ def drop_caps(user=None, group=None, caps=[]):
     prctl.cap_inheritable.limit()
 
 
+def read_servers(cfg, sloop):
+    """Read all servers from the configuration file and connect to each of
+    them.
+    """
+    servers = []
+    for socket_fn in split_cfg_list(cfg_get_def(cfg, 'daemon',
+            'ovpn_mgmt_sockets', '')):
+        server = ovpn.OvpnServer(sloop, socket_fn)
+        servers.append(server)
+    return servers
+
+
 def main():
     prctl.set_name('odrd')
     prctl.set_proctitle(' '.join(sys.argv))
@@ -545,6 +557,8 @@ def main():
 
     timeout_mgr = TimeoutManager()
     sloop.add_idle_handler(timeout_mgr)
+
+    servers = read_servers(cfg, sloop)
 
     def create_dhcp_address_request(**kwargs):
         return odr.dhcprequestor.DhcpAddressInitialRequest(
