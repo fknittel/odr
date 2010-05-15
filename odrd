@@ -26,6 +26,7 @@ import traceback
 import os
 import pwd
 import grp
+import time
 import signal
 import prctl
 import socket
@@ -33,7 +34,6 @@ from optparse import OptionParser
 from ConfigParser import SafeConfigParser
 
 import odr.ovpn as ovpn
-import odr.machasher
 from odr.cmdconnection import CommandConnection, CommandConnectionListener
 from odr.timeoutmgr import TimeoutManager
 from odr.socketloop import SocketLoop
@@ -241,11 +241,10 @@ class OvpnClientManager(object):
 
 class OpenVpnCmdConn(CommandConnection):
     def __init__(self, sloop, sock, realms_data, add_request_clb,
-            full_username_to_mac_clb, parse_username_clb):
+            parse_username_clb):
         super(OpenVpnCmdConn, self).__init__(sloop, sock)
         self._realms_data = realms_data
         self._add_request = add_request_clb
-        self._full_username_to_mac = full_username_to_mac_clb
         self._parse_username = parse_username_clb
         self._ret_f = None
         self._wrote_ret = False
@@ -267,12 +266,22 @@ class OpenVpnCmdConn(CommandConnection):
         ovpn.write_deferred_ret_file(self._ret_f, val)
         self._wrote_ret = True
 
+    def _verify_lease_expectations(self, res):
+        # The timeout may be reduced by a few seconds due to the time used up
+        # by the DHCP hand-shake.
+        DHCP_HANDSHAKE_TIME = 30
+
+        exp_lease_timeout = time.time() + \
+                self._realm_data.expected_dhcp_lease_time - DHCP_HANDSHAKE_TIME
+
+        if res['lease_timeout'] < exp_lease_timeout:
+            self.log.warn("Received IP address lease time lower than the " \
+                    "expected time: %fs < %fs" % (res['lease_timeout'],
+                            exp_lease_timeout))
+
     def _success_handler(self, res):
         self.log.debug('DHCP request succeeded: %s' % repr(res))
-        if res['lease_time'] < self._realm_data.expected_dhcp_lease_time:
-            self.log.warn("Received IP address lease time lower than the " \
-                    "expected time: %ds < %ds" % (res['lease_time'],
-                            self._realm_data.expected_dhcp_lease_time))
+        self._verify_lease_expectations(res)
 
 	self.log.debug('writing OpenVPN client configuration')
         self._config_f.seek(0)
@@ -337,12 +346,10 @@ class OpenVpnCmdConn(CommandConnection):
         self._ret_f = ret_f
         self._config_f = config_f
 
-        self._mac_addr = self._full_username_to_mac(self._full_username)
-
         try:
             self._add_request(success_handler_clb=self._success_handler,
                     failure_handler_clb=self._failure_handler,
-                    mac_addr=self._mac_addr,
+                    client_identifier=self._full_username,
                     device=self._realm_data.dhcp_listening_device,
                     local_ip=self._realm_data.dhcp_listening_ip,
                     local_port=self._realm_data.dhcp_local_port,
@@ -540,7 +547,7 @@ def main():
     sloop.add_idle_handler(timeout_mgr)
 
     def create_dhcp_address_request(**kwargs):
-        return odr.dhcprequestor.DhcpAddressRequest(
+        return odr.dhcprequestor.DhcpAddressInitialRequest(
                 timeout_mgr=weakref.proxy(timeout_mgr), **kwargs)
 
     requestor_mgr = odr.dhcprequestor.DhcpAddressRequestorManager(
@@ -553,7 +560,6 @@ def main():
         return OpenVpnCmdConn(sloop, sock,
                 realms_data=realms_data,
                 add_request_clb=requestor_mgr.add_request,
-                full_username_to_mac_clb=odr.machasher.hash_login_to_mac,
                 parse_username_clb=parse_username.parse_username)
 
     cmd_socket_uids = users_to_uids(split_cfg_list(cfg_get_def(cfg, 'daemon',

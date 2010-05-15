@@ -1,8 +1,5 @@
 Planned features / unsolved issues / wishlist items
 
-* Request parameters T1 (code 58) and T2 (code 59) to know when to enter REFRESH
-  or REBIND state.
-
 * Allow an OpenVPN tunnel to provide only partial routing, instead of always
   providing the default route.
   + Request DHCP rfc3442-classless-static-routes and convert to matching
@@ -41,19 +38,6 @@ Planned features / unsolved issues / wishlist items
 * Release DHCP leases on coordinated disconnect.
   + Probably not possible, because there's no such thing as a coordinated
     disconnect in OpenVPN.
-
-* Can DHCP's 'CHADDR' field be left empty if a client-identifier is used?
-  This would avoid the need for full_username -> MAC address hashing and avoid
-  any potential for collisions.
-  + According to RFC 2131 section 4.2 (p. 26), the DHCP server MUST use the
-    client-identifier to associate a lease with a client, if the client
-    supplies one.  (Otherwise it MUST use the 'CHADDR'.)
-  + Client-identifier does not need to be the DNS name, so using the
-    full_username is fine (according to RFC 2131).
-  + It is unclear whether the 'CHADDR' can be left zeroed out.  RFC 2131
-    says "The client MUST include its hardware address in the 'chaddr' field,
-    if necessary for delivery of DHCP reply messages." in section 4.4.1 (p. 36).
-    So it should be possible for DHCP relay messages to leave the field empty.
 
 * Send DHCPREQUEST to all servers that were initially contacted.  This tells
   the servers that are not mentioned in the 'server identifier' field of the

@@ -27,7 +27,7 @@ import errno
 
 from pydhcplib.dhcp_packet import DhcpPacket
 from pydhcplib.type_ipv4 import ipv4
-from pydhcplib.type_hwmac import hwmac
+from pydhcplib.type_strlist import strlist
 
 
 class DhcpAddressRequest(object):
@@ -64,26 +64,30 @@ class DhcpAddressRequest(object):
         @param local_ip: IP address from which all DHCP requests originate and
                 on which the responses are received.  Is used within the DHCP
                 packets.
-        @param mac_addr: The Ethernet MAC address for which an IP address is
-                requested.
+        @param client_identifier: The client identifier which will represent the
+                client for which an IP address is requested.
         @param server_ips: A list of IP addresses to which the DHCP requests
                 should be sent.
         @param max_retries: The maximum number of retries after timeouts.
                 Defaults to 2 retries.
         @param timeout: Number of seconds to wait for a DHCP response before
                 timing out and/or retrying the request.  Defaults to 5 seconds.
+
+        Uses super().
         """
+        super(DhcpAddressRequest, self).__init__(**kwargs)
+
         self._requestor = kwargs["requestor"]
         self._timeout_mgr = kwargs["timeout_mgr"]
         self._success_handler = kwargs["success_handler_clb"]
         self._failure_handler = kwargs["failure_handler_clb"]
         self._local_ip = ipv4(kwargs["local_ip"])
-        self._mac_addr = hwmac(kwargs["mac_addr"])
+        self._client_identifier = strlist(kwargs["client_identifier"])
         self._server_ips = [ipv4(ip) for ip in kwargs["server_ips"]]
         self._max_retries = kwargs.get("max_retries", 2)
         self._timeout = kwargs.get("timeout", 5)
 
-        self.log = logging.getLogger('dhcpaddrreq')
+        self._start_time = time.time()
 
         self._xid = ipv4([random.randint(0, 255) for i in range(4)])
 
@@ -91,12 +95,6 @@ class DhcpAddressRequest(object):
         self._timeout_time = None
         # What was the contents of the last packet?  (Used for retry.)
         self._last_packet = None
-
-        self._state = self.AR_DISCOVER
-
-        self.log.debug('xid %d created' % self.xid)
-        self._requestor.add_request(self)
-        self._send_packet(self._generate_discover())
 
     def __del__(self):
         self.log.debug('xid %d destroyed' % self.xid)
@@ -107,37 +105,26 @@ class DhcpAddressRequest(object):
         """
         return self._xid.int()
 
-    def _generate_discover(self):
-        """Generates a DHCP DISCOVER packet.
-        """
+    def _generate_base_packet(self):
         packet = DhcpPacket()
         packet.AddLine("op: BOOTREQUEST")
-        packet.AddLine("htype: 1")
-        packet.AddLine("hlen: 6")
-        packet.AddLine("hops: 1")
         packet.SetOption("xid", self._xid.list())
-        packet.AddLine("parameter_request_list: subnet_mask,router,domain_name_server,domain_name")
-        packet.AddLine("dhcp_message_type: DHCP_DISCOVER")
 
         # We're the gateway.
         packet.SetOption("giaddr", self._local_ip.list())
 
-        # Request IP address, etc. for the following MAC address.
-        packet.SetOption("chaddr", self._mac_addr.list() + 10*[0])
+        # Request IP address, etc. for the following client identifier.
+        packet.SetOption("client_identifier", self._client_identifier.list())
+
+        # We pretend to be a gateway, so the packet hop count is > 0 here.
+        packet.AddLine("hops: 1")
 
         return packet
 
-    def _generate_request(self, offer_packet):
-        """Generates a DHCP REQUEST packet.
-        """
-        packet = DhcpPacket()
-        packet.AddLine("op: BOOTREQUEST")
-        packet.AddLine("dhcp_message_type: DHCP_REQUEST")
-        for opt in ["htype", "hlen", "xid", "flags", "siaddr",
-                "giaddr", "chaddr", "server_identifier"]:
-            packet.SetOption(opt, offer_packet.GetOption(opt))
-        packet.SetOption("request_ip_address", offer_packet.GetOption("yiaddr"))
-        return packet
+    def _add_option_list(self, packet):
+        packet.AddLine("parameter_request_list: subnet_mask,router," \
+                "domain_name_server,domain_name,renewal_time_value," \
+                "rebinding_time_value")
 
     def _retrieve_server_ip(self, packet):
         """In case we're sending the requests to more than one DHCP server,
@@ -249,8 +236,14 @@ class DhcpAddressRequest(object):
         while len(dns_list) >= 4:
             dns.append(str(ipv4(dns_list[:4])))
             dns_list = dns_list[4:]
-        result['lease_time'] = ipv4(packet.GetOption('ip_address_lease_time'))\
-                .int()
+
+        # Calucate lease timeouts
+        lease_delta = ipv4(packet.GetOption('ip_address_lease_time')).int()
+        result['lease_timeout'] = self._start_time + lease_delta
+        renewal_delta = ipv4(packet.GetOption('renewal_time_value')).int()
+        result['renewal_timeout'] = self._start_time + renewal_delta
+        rebinding_delta = ipv4(packet.GetOption('rebinding_time_value')).int()
+        result['rebinding_timeout'] = self._start_time + rebinding_delta
 
         self._success_handler(result)
 
@@ -298,6 +291,46 @@ class DhcpAddressRequest(object):
             self._failure_handler()
         elif self._last_packet is not None:
             self._resend_packet()
+
+
+class DhcpAddressInitialRequest(DhcpAddressRequest):
+    """
+    """
+
+    def __init__(self, **kwargs):
+        """Sets up the initial address request.
+
+        See DhcpAddressRequest.__init__ for further parameters.
+
+        Uses super().
+        """
+        super(DhcpAddressInitialRequest, self).__init__(**kwargs)
+
+        self.log = logging.getLogger('dhcpaddrinitreq')
+        self.log.debug('initial request with xid %d created' % self.xid)
+        self._state = self.AR_DISCOVER
+
+        self._requestor.add_request(self)
+        self._send_packet(self._generate_discover())
+
+    def _generate_discover(self):
+        """Generates a DHCP DISCOVER packet.
+        """
+        packet = self._generate_base_packet()
+        packet.AddLine("dhcp_message_type: DHCP_DISCOVER")
+        self._add_option_list(packet)
+        return packet
+
+    def _generate_request(self, offer_packet):
+        """Generates a DHCP REQUEST packet.
+        """
+        packet = self._generate_base_packet()
+        packet.AddLine("dhcp_message_type: DHCP_REQUEST")
+        self._add_option_list(packet)
+        for opt in ["server_identifier"]:
+            packet.SetOption(opt, offer_packet.GetOption(opt))
+        packet.SetOption("request_ip_address", offer_packet.GetOption("yiaddr"))
+        return packet
 
 
 class DhcpLocalAddressBindFailed(Exception):
