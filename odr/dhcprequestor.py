@@ -84,13 +84,16 @@ class DhcpAddressRequest(object):
         self._local_ip = ipv4(kwargs["local_ip"])
         self._client_identifier = strlist(kwargs["client_identifier"])
         self._server_ips = [ipv4(ip) for ip in kwargs["server_ips"]]
-        self._max_retries = kwargs.get("max_retries", 2)
-        self._timeout = kwargs.get("timeout", 5)
+        self._max_retries = kwargs.get("max_retries", 3)
+        self._initial_timeout = kwargs.get("timeout", 4)
 
         self._start_time = time.time()
 
         self._xid = ipv4([random.randint(0, 255) for i in range(4)])
 
+        # What's the current timeout?  (Will be increased after each timeout
+        # event.)
+        self._timeout = None
         # When will the packet time out?
         self._timeout_time = None
         # What was the contents of the last packet?  (Used for retry.)
@@ -148,19 +151,24 @@ class DhcpAddressRequest(object):
         """
         self._last_packet = packet
         self._packet_retries = 0
+        self._timeout = self._initial_timeout
         self._send_to_server(packet)
 
     def _resend_packet(self):
         """Method to re-send the packet that was sent last.
         """
         self._packet_retries += 1
+        self._timeout *= 2
         self._send_to_server(self._last_packet)
 
     def _send_to_server(self, packet):
         """Method that does the actual packet sending.  The packet is sent once
         for each DHCP server destination.
         """
-        self._timeout_time = time.time() + self._timeout
+        randomised_timeout = self._timeout + random.uniform(-1, 1)
+        self.log.debug('timeout for xid %d is %ds' % (self.xid,
+            randomised_timeout))
+        self._timeout_time = time.time() + randomised_timeout
         self._timeout_mgr.add_timeout_object(self)
         for server_ip in self._server_ips:
             self.log.debug("Sending packet in state %d to %s [%d/%d]" % (
