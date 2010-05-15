@@ -55,7 +55,7 @@ class LineSocket(object):
         if new_data == '':
             # Received EOF.  Return any incomplete lines.
             self._in_buf = ''
-            if len(lines) == 1 and lines[0] != '':
+            if len(lines) == 1 and lines[0] == '':
                 return None
         else:
             # Store incomplete line-fragment.
