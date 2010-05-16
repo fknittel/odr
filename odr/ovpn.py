@@ -36,6 +36,26 @@ def write_deferred_ret_file(fp, val):
     os.fsync(fp.fileno())
 
 
+def determine_daemon_name(script_name):
+    """We identify the OpenVPN server instance calling us by either looking at
+    an environment variable or by trying to deduce the name from the way we
+    were called.
+
+    @param script_name: The regular base filename of this Python script.
+    @return: Returns the OpenVPN server instance name or None.
+    """
+    import sys
+
+    if 'daemon_name' in os.environ:
+        return os.environ['daemon_name']
+
+    b = os.path.basename(sys.argv[0])
+    if b.startswith('%s_' % script_name):
+        return b[len(script_name) + 1:]
+
+    return None
+
+
 class OvpnClientConnData(object):
     __slots__ = ['__weakref__', 'common_name', 'real_address',
             'virtual_address', 'bytes_rcvd', 'bytes_sent', 'connected_since',

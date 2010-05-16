@@ -81,7 +81,8 @@ class OvpnClient(object):
     """
 
     def __init__(self, timeout_mgr, refresh_lease_clb, full_username,
-                server, realm_data, leased_ip_address, rebinding_timeout):
+                server, realm_data, leased_ip_address=None,
+                rebinding_timeout=None):
         self._timeout_mgr = timeout_mgr
         self._refresh_lease = refresh_lease_clb
         self.full_username = full_username
@@ -90,9 +91,8 @@ class OvpnClient(object):
         self._leased_ip_address = leased_ip_address
         self._rebinding_timeout = rebinding_timeout
 
-        self._active = True
-        self._timeout_mgr.add_timeout_object(self)
         self.log = logging.getLogger('ovpnclient')
+        self._killed = False
 
     def __str__(self):
         return '%s on %s' % (self.full_username, self.server)
@@ -101,11 +101,21 @@ class OvpnClient(object):
         return "<OvpnClient(common_name=%s, server=%s, ...)>" % (
                 self.full_username, self.server)
 
-    def set_inactive(self):
+    def track_lease(self):
+        """Start keeping track of the DHCP lease time and make sure the lease
+        is refreshed early enough.
+        """
+        if self._leased_ip_address is None or self._rebinding_timeout is None:
+            self.log.error('attempted to track lease for client "%s", but no ' \
+                    'lease available.' % self)
+            return
+        self._timeout_mgr.add_timeout_object(self)
+
+    def kill(self):
         """Disable the client.  Although any pending activities will continue,
         no new activities will be started.
         """
-        self._active = False
+        self._killed = True
 
     @property
     def timeout_time(self):
@@ -114,7 +124,7 @@ class OvpnClient(object):
     def handle_timeout(self):
         """Called as soon as the rebinding timeout occurs.
         """
-        if not self._active:
+        if self._killed:
             return
 
         try:
@@ -133,7 +143,7 @@ class OvpnClient(object):
             self.server.disconnect_client(self.full_username)
 
     def _handle_lease_refresh_succeeded(self, res):
-        if not self._active:
+        if self._killed:
             return
 
         self.log.debug('DHCP refresh request succeeded: %s' % repr(res))
@@ -142,11 +152,14 @@ class OvpnClient(object):
         self._timeout_mgr.add_timeout_object(self)
 
     def _handle_lease_refresh_failed(self):
-        if not self._active:
+        if self._killed:
             return
 
         self.server.disconnect_client(self.full_username)
 
+    @property
+    def realm_data(self):
+        return self._realm_data
 
 
 class OvpnClientManager(object):
@@ -187,6 +200,7 @@ class OvpnClientManager(object):
     def create_client(self, **kwargs):
         client = OvpnClient(timeout_mgr=self._timeout_mgr,
                 refresh_lease_clb=self._refresh_lease, **kwargs)
+        client.track_lease()
         self._add_client(client)
         return client
 
@@ -258,7 +272,7 @@ class OvpnClientManager(object):
             if client_data.common_name not in self._clients_by_username:
                 # New client!  Assume pessimistic last lease update time.  We're
                 # probably recovering from a daemon restart.
-                self._create_detected_client(client_data, server)
+                self._create_detected_client(client_data.common_name, server)
 
         for client in self._clients_by_server[server].values():
             if client.full_username not in client_data_by_username:
@@ -268,20 +282,40 @@ class OvpnClientManager(object):
                 self._del_client(client)
 
     def _del_client(self, client):
-        client.set_inactive()
+        client.kill()
         del self._clients_by_username[client.full_username]
         del self._clients_by_server[client.server][client.full_username]
 
-    def _create_detected_client(self, client_data, server):
-        """Create a client instance based off of client data retrieved from an
-        OpenVPN server.  As we have no knowledge of the last DHCP lease refresh
-        time, the client's next lease update time is set to "soon".
+    def client_disconnected(self, full_username, server):
+        """Called when a client was disconnected.
         """
-        full_username = client_data.common_name
+        if server not in self._clients_by_server:
+            self.log.error('attempting to disconnect user from non-existant ' \
+                    'server "%s" (user "%s")' % (server, full_username))
+            return
+        server_clients = self._clients_by_server[server]
+
+        if full_username not in server_clients:
+            self.log.error('attempting to disconnect user: "%s"' %\
+                    full_username)
+            return
+        client = server_clients[full_username]
+
+        self.log.debug('disconnected %s' % client)
+        self._del_client(client)
+
+    def _create_detected_client(self, full_username, server):
+        """Create a client instance without knowledge of the last DHCP lease
+        refresh time.  Therefore, the client's next lease update time is set to
+        "soon".
+
+        @param full_username: The full username of the connected client.
+        @param server: The server instance the client is connected to.
+        """
         self.log.debug('detected client "%s"' % full_username)
         ret = self._parse_username(full_username)
         if ret is None:
-            self.log.warning('parsing detected username failed: "%s"' % \
+            self.log.warning('parsing username "%s" failed' % \
                     full_username)
             server.disconnect_client(full_username)
             return
@@ -292,29 +326,30 @@ class OvpnClientManager(object):
                     full_username))
             server.disconnect_client(full_username)
             return
+        realm_data = self._realms_data[realm]
 
         # We have no idea when the last refresh occured for this client,
         # but it's unlikely to be needed immediately.  Spread out the
         # requests a bit.
         rebinding_timeout = time.time() + random.uniform(0, 10)
 
-        client = self.create_client(server=server,
-                full_username=client_data.common_name,
-                realm_data=self._realms_data[realm],
+        self.create_client(server=server,
+                full_username=full_username,
+                realm_data=realm_data,
                 leased_ip_address=client_data.virtual_address,
                 rebinding_timeout=rebinding_timeout)
-
 
 
 class OpenVpnCmdConn(CommandConnection):
     def __init__(self, sloop, sock, realms_data, servers, add_request_clb,
-            parse_username_clb, create_client_clb):
+            parse_username_clb, create_client_clb, remove_client_clb):
         CommandConnection.__init__(self, sloop=sloop, sock=sock)
         self._realms_data = realms_data
         self._servers = servers
         self._add_request = add_request_clb
         self._parse_username = parse_username_clb
         self._create_client = create_client_clb
+        self._remove_client = remove_client_clb
         self._ret_f = None
         self._wrote_ret = False
         self._config_f = None
@@ -379,6 +414,16 @@ class OpenVpnCmdConn(CommandConnection):
         self._write_ret(ovpn.CC_RET_FAILED)
 
     def handle_cmd(self, cmd, params, files):
+        if cmd == 'request':
+            self._handle_request_cmd(cmd, params, files)
+        elif cmd == 'disconnect':
+            self._handle_disconnect_cmd(cmd, params, files)
+        else:
+            self.send_cmd('FAIL')
+            self.log.warning('received unknown command "%s"' % cmd)
+            return
+
+    def _handle_request_cmd(self, cmd, params, files):
         try:
             self._full_username = params['full_username']
             ret_fidx = params['ret_file_idx']
@@ -413,12 +458,12 @@ class OpenVpnCmdConn(CommandConnection):
 
         if realm not in self._realms_data:
             self.send_cmd('FAIL')
-            self.log.error('Unknown realm %s.' % realm)
+            self.log.error('unknown realm "%s"' % realm)
             return
 
         if server_name not in self._servers:
             self.send_cmd('FAIL')
-            self.log.error('Unknown server %s.' % server_name)
+            self.log.error('unknown server "%s"' % server_name)
             return
 
         self._realm_data = self._realms_data[realm]
@@ -439,6 +484,25 @@ class OpenVpnCmdConn(CommandConnection):
                     lease_time=self._realm_data.expected_dhcp_lease_time)
         except:
             self.log.exception('Adding a new DHCP request failed')
+
+    def _handle_disconnect_cmd(self, cmd, params, files):
+        try:
+            full_username = params['full_username']
+            server_name = params['daemon_name']
+        except KeyError, e:
+            self.send_cmd('FAIL')
+            self.log.warning('command "%s" is missing a parameter: %s' % (cmd,
+                    e.args))
+            return
+
+        if server_name not in self._servers:
+            self.send_cmd('FAIL')
+            self.log.error('unknown server "%s"' % server_name)
+            return
+        server = self._servers[server_name]
+
+        self.send_cmd('OK')
+        self._remove_client(full_username, server)
 
 
 def cfg_get_def(cfg, sect, opt, default=None):
@@ -683,6 +747,7 @@ def main():
                 realms_data=realms_data,
                 servers=servers,
                 create_client_clb=client_mgr.create_client,
+                remove_client_clb=client_mgr.client_disconnected,
                 add_request_clb=start_dhcp_address_request,
                 parse_username_clb=parse_username.parse_username)
 
