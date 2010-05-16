@@ -57,6 +57,32 @@ class OvpnClientConnData(object):
         return "<OvpnClientConnData common_name=%s, ...>" % self.common_name
 
 
+class StateQueue(object):
+    """Manages a simple FIFO state queue with an idle state in case the queue is
+    empty.
+    """
+    def __init__(self, idle_state):
+        self._queue = []
+        self._idle = idle_state
+        self._current = self._idle
+
+    @property
+    def current(self):
+        return self._current
+
+    def add(self, new_state):
+        if len(self._queue) == 0:
+            self._current = new_state
+        else:
+            self._queue.append(new_state)
+
+    def current_done(self):
+        if len(self._queue) == 0:
+            self._current = self._idle
+        else:
+            self._current = self._queue.pop(0)
+
+
 class OvpnServer(object):
     def __init__(self, sloop, name, socket_fn):
         self._sloop = sloop
@@ -71,11 +97,9 @@ class OvpnServer(object):
         sock.connect(self._socket_fn)
         self._socket = LineSocket(sock)
 
-        self._idle_state = _OvpnIdleState()
-        self._state_queue = []
-        self._state = self._idle_state
+        self._cmd_state = StateQueue(idle_state=_OvpnIdleState())
+        self._cmd_state.add(_OvpnWaitConnectState(self, self._on_connected))
 
-        self._add_state(_OvpnWaitConnectState(self, self._on_connected))
         self._sloop.add_socket_handler(self)
 
     def _on_connected(self, hello_msg):
@@ -122,25 +146,11 @@ class OvpnServer(object):
         for line in lines:
             # Feed each line to the current state.  If the state indicates
             # completion, move to next state.
-            if not self._state.handle_line(line):
-                self._next_state()
+            if not self._cmd_state.current.handle_line(line):
+                self._cmd_state.current_done()
 
     def _send_cmd(self, cmd):
         self._socket.send(cmd.replace('\n', '\\n') + '\n')
-
-    def _next_state(self):
-        self.log.debug('moving to next state (queue: %s)' % \
-                repr(self._state_queue))
-        if len(self._state_queue) == 0:
-            self._state = self._idle_state
-        else:
-            self._state = self._state_queue.pop(0)
-
-    def _add_state(self, new_state):
-        if len(self._state_queue) == 0:
-            self._state = new_state
-        else:
-            self._state_queue.append(new_state)
 
     def disconnect_client(self, common_name):
         """Disconnects the specified client from this OpenVPN server instance.
@@ -150,7 +160,7 @@ class OvpnServer(object):
         """
         self.log.debug('disconnecting client %s from OpenVPN server "%s"' % \
                 (common_name, self.name))
-        self._add_state(_OvpnDisconnectClientsState(self, common_name,
+        self._cmd_state.add(_OvpnDisconnectClientsState(self, common_name,
                 lambda res:None))
 
     def poll_client_list(self, list_done_clb):
@@ -163,7 +173,7 @@ class OvpnServer(object):
         """
         self.log.debug('polling user list from OpenVPN server "%s"' % \
                 self.name)
-        self._add_state(_OvpnListClientsState(self, list_done_clb))
+        self._cmd_state.add(_OvpnListClientsState(self, list_done_clb))
 
 
 class _OvpnStateInterface(object):
