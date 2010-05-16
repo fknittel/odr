@@ -29,6 +29,9 @@ class TimeoutObject(object):
     def handle_timeout(self):
         self._timeout_func()
 
+    def __repr__(self):
+        return "<%s wrapping %s>" % (self.__class__, repr(self._timeout_func))
+
 
 class TimeoutManager(object):
     """The TimeoutManager keeps track of objects that have a timeout time set.

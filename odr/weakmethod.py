@@ -85,6 +85,10 @@ class WeakBoundMethod(object):
             raise ReferenceError
         return self._free_method(instance, *args, **kwargs)
 
+    def __repr__(self):
+        return "<%s wrapping %s and %s>" % (self.__class__,
+                repr(self._weak_instance()), repr(self._free_method))
+
 if __name__ == '__main__':
     import doctest
     doctest.testmod()
