@@ -8,20 +8,23 @@ Planned features / unsolved issues / wishlist items
   + Pass full_username on to DHCP server as client-identifer, allowing the
     DHCP server to send static routes depending on the full_username.
 
+* Periodically attempt to re-establish OpenVPN management connection after EOF.
+  + Without re-establishing the connection, an OpenVPN restart causes the
+    connection to be lost.
+  + Same probably goes for initial establishing.
+  + A single down OpenVPN server instance shouldn't cause odrd to fail, as
+    there might be other instances that need to be served.
+  + Add random delay before refreshing a lease for detected clients.  Otherwise
+    too many DHCP requests might be sent simultaneously.
+
 * Refresh DHCP leases.
-  + Remember granted leases, refresh in time.
-  + Track client connection list and disconnect events.  Prevents refreshing
-    leases from clients that are no longer connected.
-  + Boot-strap the list of granted leases by reading all client connection
-    lists and assuming that the next lease refresh is due soon.  (Alternatively,
-    odrd would need to maintain a database.)
   + A lease time option must explicitly be set for a DHCP lease to be extended.
-    Otherwise only the remaining lease time is returned.. (RFC 2131, p. 28)
-  + For DHCPREQUESTs in renewing or rebinding state: 'requested IP address'
-    MUST NOT be filled in, 'CIADDR' MUST be filled in. This means requests in
-    those states are answered as unicasts without using giaddr, so we won't be
-    able to do it that way.  Use a DHCPREQUEST in init-reboot state instead
-    (RFC 2131 p. 31).
+    Otherwise only the remaining lease time is returned. (RFC 2131, p. 28)
+    (Some DHCP servers appear to extend the lease even without that.)
+  + Track ovpn disconnect events.
+  + If lease timeout has been reached, disconnect the client instead of
+    attempting to refresh an address. (It's just too late.)
+  + Refactor code.
 
 * Try to implement some mechanism to determine if an IP address is already in
   use (especially by non-OpenVPN users).
@@ -44,5 +47,3 @@ Planned features / unsolved issues / wishlist items
   DHCPREQUEST, that the IP addresses they potentially offered may be freed
   again. (Compare with RFC 2131, page 16, section 3.1, points 3 and 4.)
   (This is optional though, as servers must time-out such offers themselves.)
-
-* Periodically attempt to re-establish OpenVPN management connection after EOF.

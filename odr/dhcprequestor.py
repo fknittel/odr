@@ -72,11 +72,7 @@ class DhcpAddressRequest(object):
                 Defaults to 2 retries.
         @param timeout: Number of seconds to wait for a DHCP response before
                 timing out and/or retrying the request.  Defaults to 5 seconds.
-
-        Uses super().
         """
-        super(DhcpAddressRequest, self).__init__(**kwargs)
-
         self._requestor = kwargs["requestor"]
         self._timeout_mgr = kwargs["timeout_mgr"]
         self._success_handler = kwargs["success_handler_clb"]
@@ -309,10 +305,8 @@ class DhcpAddressInitialRequest(DhcpAddressRequest):
         """Sets up the initial address request.
 
         See DhcpAddressRequest.__init__ for further parameters.
-
-        Uses super().
         """
-        super(DhcpAddressInitialRequest, self).__init__(**kwargs)
+        DhcpAddressRequest.__init__(self, **kwargs)
 
         self.log = logging.getLogger('dhcpaddrinitreq')
         self.log.debug('initial request with xid %d created' % self.xid)
@@ -338,6 +332,36 @@ class DhcpAddressInitialRequest(DhcpAddressRequest):
         for opt in ["server_identifier"]:
             packet.SetOption(opt, offer_packet.GetOption(opt))
         packet.SetOption("request_ip_address", offer_packet.GetOption("yiaddr"))
+        return packet
+
+
+class DhcpAddressRefreshRequest(DhcpAddressRequest):
+    """
+    """
+
+    def __init__(self, **kwargs):
+        """Sets up the address request.
+
+        See DhcpAddressRequest.__init__ for further parameters.
+        """
+        DhcpAddressRequest.__init__(self, **kwargs)
+
+        self._client_ip = ipv4(kwargs["client_ip"])
+        self.log = logging.getLogger('dhcpaddrrefreshreq')
+        self.log.debug('refresh request with xid %d created' % self.xid)
+
+        self._state = self.AR_REQUEST
+
+        self._requestor.add_request(self)
+        self._send_packet(self._generate_request())
+
+    def _generate_request(self):
+        """Generates a DHCP REQUEST packet.
+        """
+        packet = self._generate_base_packet()
+        packet.AddLine("dhcp_message_type: DHCP_REQUEST")
+        self._add_option_list(packet)
+        packet.SetOption("request_ip_address", self._client_ip.list())
         return packet
 
 
@@ -474,18 +498,11 @@ class DhcpAddressRequestor(object):
 
 
 class DhcpAddressRequestorManager(object):
-    """Provides a simple mechanism for initiating a DHCP address request.  The
-    new request is associated with the requestor that has a matching originating
-    IP address.
-
-    For this purpose it holds a list of all available requestors.
+    """Holds a list of all available requestors.  Not much more than a
+    dictionary with added error detection.
     """
-    def __init__(self, request_factory):
-        """@param request_factory: Factory method that will construct the
-                specific address request.
-        """
+    def __init__(self):
         self._requestors_by_device_and_ip = {}
-        self._request_factory = request_factory
         self.log = logging.getLogger('dhcpaddrrequestormgr')
 
     def add_requestor(self, requestor):
@@ -499,24 +516,10 @@ class DhcpAddressRequestorManager(object):
             return
         self._requestors_by_device_and_ip[listen_pair] = requestor
 
-    def add_request(self, device, local_ip, **kwargs):
-        """Constructs and adds a new DHCP address request.  Uses the local_ip
-        to select a matching requestor.  Uses the request factory method to
-        create the actual request.
-
-	@param device: Network device name from where the request should
-                originate.
-        @param local_ip: IP address where the request should originate from.
-        @param **kwargs: Additional keyword arguments needed by the request
-                factory method.
-        """
+    def get_requestor(self, device, local_ip):
         listen_pair = (device, local_ip)
         if listen_pair not in self._requestors_by_device_and_ip:
             self.log.error('request for unsupported local IP %s@%s' % (local_ip,
                     device))
-            return
-        requestor = self._requestors_by_device_and_ip[listen_pair]
-        request = self._request_factory(requestor=weakref.proxy(requestor),
-                local_ip=local_ip, **kwargs)
-        requestor.add_request(request)
-
+            return None
+        return self._requestors_by_device_and_ip[listen_pair]

@@ -25,6 +25,7 @@ import odr.ovpn as ovpn
 import odr.cmdconnection as cmdconnection
 import fdsend
 
+SCRIPT_NAME = 'odr-ovpn'
 CMD_SOCKET = '/var/run/odr/cmd.sock'
 
 class flushedstream(object):
@@ -37,19 +38,44 @@ sys.stdout = flushedstream(sys.stdout)
 sys.stderr = flushedstream(sys.stderr)
 
 
+#
+# Gather configuration
+#
+
 cfg_f = open(os.environ['client_connect_config_file'], 'wb')
 ret_f = open(os.environ['client_connect_deferred_file'], 'wb')
 full_username = os.environ['username']
+
+# We need to identify the OpenVPN server instance calling us.  We either
+# look at an environment variable or try to deduce the name from the way we
+# were called.
+daemon_name = None
+if 'daemon_name' in os.environ:
+    daemon_name = os.environ['daemon_name']
+else:
+    b = os.path.basename(sys.argv[0])
+    if b.startswith('%s_' % SCRIPT_NAME):
+        daemon_name = b[len(SCRIPT_NAME) + 1:]
+    del b
+
+
+#
+# Build and submit command
+#
+
+params = {'full_username':full_username,
+        'ret_file_idx':'0',
+        'config_file_idx':'1'}
+if daemon_name is not None:
+    params['daemon_name'] = daemon_name
 
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.connect(CMD_SOCKET)
 
 ovpn.write_deferred_ret_file(ret_f, ovpn.CC_RET_DEFERRED)
 try:
-    fdsend.sendfds(s, cmdconnection.pack_cmd('request', {
-            'full_username':full_username,
-            'ret_file_idx':'0',
-            'config_file_idx':'1'}), fds=[ret_f, cfg_f])
+    fdsend.sendfds(s, cmdconnection.pack_cmd('request', params),
+            fds=[ret_f, cfg_f])
 
     ret, _ = fdsend.recvfds(s, 1024, numfds=0)
     print 'Received: %s' % ret
