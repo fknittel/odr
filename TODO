@@ -14,13 +14,8 @@ Planned features / unsolved issues / wishlist items
   + Same probably goes for initial establishing.
   + A single down OpenVPN server instance shouldn't cause odrd to fail, as
     there might be other instances that need to be served.
-  + Add random delay before refreshing a lease for detected clients.  Otherwise
-    too many DHCP requests might be sent simultaneously.
 
 * Refresh DHCP leases.
-  + A lease time option must explicitly be set for a DHCP lease to be extended.
-    Otherwise only the remaining lease time is returned. (RFC 2131, p. 28)
-    (Some DHCP servers appear to extend the lease even without that.)
   + Track ovpn disconnect events.
   + If lease timeout has been reached, disconnect the client instead of
     attempting to refresh an address. (It's just too late.)

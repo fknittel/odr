@@ -30,6 +30,7 @@ import time
 import signal
 import prctl
 import socket
+import random
 from optparse import OptionParser
 from ConfigParser import SafeConfigParser
 
@@ -125,7 +126,8 @@ class OvpnClient(object):
                     local_ip=self._realm_data.dhcp_listening_ip,
                     local_port=self._realm_data.dhcp_local_port,
                     server_ips=self._realm_data.dhcp_server_ips,
-                    client_ip=self._leased_ip_address)
+                    client_ip=self._leased_ip_address,
+                    lease_time=self._realm_data.expected_dhcp_lease_time)
         except:
             self.log.exception('Adding a new DHCP refresh request failed')
             self.server.disconnect_client(self.full_username)
@@ -291,11 +293,16 @@ class OvpnClientManager(object):
             server.disconnect_client(full_username)
             return
 
+        # We have no idea when the last refresh occured for this client,
+        # but it's unlikely to be needed immediately.  Spread out the
+        # requests a bit.
+        rebinding_timeout = time.time() + random.uniform(0, 10)
+
         client = self.create_client(server=server,
                 full_username=client_data.common_name,
                 realm_data=self._realms_data[realm],
                 leased_ip_address=client_data.virtual_address,
-                rebinding_timeout=0)
+                rebinding_timeout=rebinding_timeout)
 
 
 
@@ -428,7 +435,8 @@ class OpenVpnCmdConn(CommandConnection):
                     device=self._realm_data.dhcp_listening_device,
                     local_ip=self._realm_data.dhcp_listening_ip,
                     local_port=self._realm_data.dhcp_local_port,
-                    server_ips=self._realm_data.dhcp_server_ips)
+                    server_ips=self._realm_data.dhcp_server_ips,
+                    lease_time=self._realm_data.expected_dhcp_lease_time)
         except:
             self.log.exception('Adding a new DHCP request failed')
 

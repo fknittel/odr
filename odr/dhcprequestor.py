@@ -72,6 +72,8 @@ class DhcpAddressRequest(object):
                 Defaults to 2 retries.
         @param timeout: Number of seconds to wait for a DHCP response before
                 timing out and/or retrying the request.  Defaults to 5 seconds.
+        @param lease_time: DHCP lease time we would like to have. Defaults to
+                None, meaning no specific lease time is requested.
         """
         self._requestor = kwargs["requestor"]
         self._timeout_mgr = kwargs["timeout_mgr"]
@@ -82,6 +84,7 @@ class DhcpAddressRequest(object):
         self._server_ips = [ipv4(ip) for ip in kwargs["server_ips"]]
         self._max_retries = kwargs.get("max_retries", 3)
         self._initial_timeout = kwargs.get("timeout", 4)
+        self._lease_time = kwargs.get("lease_time", None)
 
         self._start_time = time.time()
 
@@ -124,6 +127,11 @@ class DhcpAddressRequest(object):
         packet.AddLine("parameter_request_list: subnet_mask,router," \
                 "domain_name_server,domain_name,renewal_time_value," \
                 "rebinding_time_value")
+
+    def _set_lease_time(self, packet):
+        if self._lease_time is None:
+            return
+        packet.SetOption('ip_address_lease_time', ipv4(self._lease_time).list())
 
     def _retrieve_server_ip(self, packet):
         """In case we're sending the requests to more than one DHCP server,
@@ -321,6 +329,7 @@ class DhcpAddressInitialRequest(DhcpAddressRequest):
         packet = self._generate_base_packet()
         packet.AddLine("dhcp_message_type: DHCP_DISCOVER")
         self._add_option_list(packet)
+        self._set_lease_time(packet)
         return packet
 
     def _generate_request(self, offer_packet):
@@ -329,6 +338,7 @@ class DhcpAddressInitialRequest(DhcpAddressRequest):
         packet = self._generate_base_packet()
         packet.AddLine("dhcp_message_type: DHCP_REQUEST")
         self._add_option_list(packet)
+        self._set_lease_time(packet)
         for opt in ["server_identifier"]:
             packet.SetOption(opt, offer_packet.GetOption(opt))
         packet.SetOption("request_ip_address", offer_packet.GetOption("yiaddr"))
@@ -361,6 +371,7 @@ class DhcpAddressRefreshRequest(DhcpAddressRequest):
         packet = self._generate_base_packet()
         packet.AddLine("dhcp_message_type: DHCP_REQUEST")
         self._add_option_list(packet)
+        self._set_lease_time(packet)
         packet.SetOption("request_ip_address", self._client_ip.list())
         return packet
 
