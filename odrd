@@ -82,7 +82,7 @@ class OvpnClient(object):
 
     def __init__(self, timeout_mgr, refresh_lease_clb, full_username,
                 server, realm_data, leased_ip_address=None,
-                rebinding_timeout=None):
+                rebinding_timeout=None, lease_timeout=None):
         self._timeout_mgr = timeout_mgr
         self._refresh_lease = refresh_lease_clb
         self.full_username = full_username
@@ -90,6 +90,7 @@ class OvpnClient(object):
         self._realm_data = realm_data
         self._leased_ip_address = leased_ip_address
         self._rebinding_timeout = rebinding_timeout
+        self._lease_timeout = lease_timeout
 
         self.log = logging.getLogger('ovpnclient')
         self._killed = False
@@ -118,13 +119,25 @@ class OvpnClient(object):
         self._killed = True
 
     @property
+    def iszombie(self):
+        return self._killed
+
+    @property
     def timeout_time(self):
         return self._rebinding_timeout
 
     def handle_timeout(self):
         """Called as soon as the rebinding timeout occurs.
         """
-        if self._killed:
+        if self.iszombie:
+            return
+
+        if self._lease_timeout is not None and \
+                self._lease_timeout <= time.time():
+            self.log.warning('Rebinding timeout for %s called too late - ' \
+                    'lease has already expired on %d.  Disconnecting client.' %\
+                    (self, self._lease_timeout))
+            self.server.disconnect_client(self.full_username)
             return
 
         try:
@@ -143,16 +156,17 @@ class OvpnClient(object):
             self.server.disconnect_client(self.full_username)
 
     def _handle_lease_refresh_succeeded(self, res):
-        if self._killed:
+        if self.iszombie:
             return
 
         self.log.debug('DHCP refresh request succeeded: %s' % repr(res))
-        self._leased_ip_address=res['ip-address']
+        self._leased_ip_address=res['ip_address']
         self._rebinding_timeout=res['rebinding_timeout']
+        self._lease_timeout=res['lease_timeout']
         self._timeout_mgr.add_timeout_object(self)
 
     def _handle_lease_refresh_failed(self):
-        if self._killed:
+        if self.iszombie:
             return
 
         self.server.disconnect_client(self.full_username)
@@ -168,6 +182,11 @@ class OvpnClientManager(object):
 
     Periodically polls the OpenVPN servers to sync the list of connected
     clients.
+
+    Note: Some clients might still be tracked by the manager, but already marked
+          as killed.  These zombies should be collected as soon as the client-
+          disconnect hook gets processed by OpenVPN or as soon as the next
+          client list poll completes.
     """
     def __init__(self, timeout_mgr, realms_data, parse_username_clb, servers,
             refresh_lease_clb, sync_interval=60):
@@ -264,9 +283,8 @@ class OvpnClientManager(object):
                 client = self._clients_by_username[client_data.common_name]
                 if client.server != server:
                     # The client has jumped servers.  Remove it from the list.
-                    self.log.debug('cleaning up: client "%s" has moved ' \
-                            'from server "%s" to server "%s".' % (
-                            client.full_username, client.server, server))
+                    self.log.debug('cleaning up: client %s has moved ' \
+                            'to server "%s".' % (client, server))
                     self._del_client(client)
 
             if client_data.common_name not in self._clients_by_username:
@@ -278,8 +296,12 @@ class OvpnClientManager(object):
         for client in self._clients_by_server[server].values():
             if client.full_username not in client_data_by_username:
                 # The client has been disconnected.
-                self.log.debug('cleaning up: client "%s" was disconnected in ' \
-                        'the mean-while.' % client.full_username)
+                if not client.iszombie:
+                    self.log.debug('cleaning up: client %s was disconnected '\
+                            'in the mean-while.' % client)
+                else:
+                    self.log.debug('cleaning up: removing zombie client %s' %\
+                            client)
                 self._del_client(client)
 
     def _del_client(self, client):
@@ -302,7 +324,10 @@ class OvpnClientManager(object):
             return
         client = server_clients[full_username]
 
-        self.log.debug('disconnected %s' % client)
+        if not client.iszombie:
+            self.log.debug('removing zombie client %s' % client)
+        else:
+            self.log.debug('disconnected %s' % client)
         self._del_client(client)
 
     def _create_detected_client(self, full_username, server, leased_ip_address):
@@ -338,10 +363,11 @@ class OvpnClientManager(object):
                 full_username=full_username,
                 realm_data=realm_data,
                 leased_ip_address=leased_ip_address,
-                rebinding_timeout=rebinding_timeout)
+                rebinding_timeout=rebinding_timeout,
+                lease_timeout=None)
 
 
-class OpenVpnCmdConn(CommandConnection):
+class OvpnCmdConn(CommandConnection):
     def __init__(self, sloop, sock, realms_data, servers, add_request_clb,
             parse_username_clb, create_client_clb, remove_client_clb):
         CommandConnection.__init__(self, sloop=sloop, sock=sock)
@@ -354,10 +380,10 @@ class OpenVpnCmdConn(CommandConnection):
         self._ret_f = None
         self._wrote_ret = False
         self._config_f = None
-        self.log = logging.getLogger('ovpncmd')
+        self.log = logging.getLogger('ovpncmdconn')
 
     def __del__(self):
-        self.log.debug('destructing OpenVpnCmdConn')
+        self.log.debug('destructing OvnCmdConn')
         if self._ret_f is not None:
             if not self._wrote_ret:
                 self._write_ret(ovpn.CC_RET_FAILED)
@@ -371,27 +397,13 @@ class OpenVpnCmdConn(CommandConnection):
         ovpn.write_deferred_ret_file(self._ret_f, val)
         self._wrote_ret = True
 
-    def _verify_lease_expectations(self, res):
-        # The timeout may be reduced by a few seconds due to the time used up
-        # by the DHCP hand-shake.
-        DHCP_HANDSHAKE_TIME = 30
-
-        exp_lease_timeout = time.time() + \
-                self._realm_data.expected_dhcp_lease_time - DHCP_HANDSHAKE_TIME
-
-        if res['lease_timeout'] < exp_lease_timeout:
-            self.log.warn("Received IP address lease time lower than the " \
-                    "expected time: %fs < %fs" % (res['lease_timeout'],
-                            exp_lease_timeout))
-
     def _success_handler(self, res):
         self.log.debug('DHCP request succeeded: %s' % repr(res))
-        self._verify_lease_expectations(res)
 
 	self.log.debug('writing OpenVPN client configuration')
         self._config_f.seek(0)
-        self._config_f.write('ifconfig-push %s %s\n' % (res['ip-address'],
-                res['subnet-mask']))
+        self._config_f.write('ifconfig-push %s %s\n' % (res['ip_address'],
+                res['subnet_mask']))
         if self._realm_data.vid is not None:
             self._config_f.write('vlan-pvid %d\n' % self._realm_data.vid)
         self._config_f.write('push "ip-win32 dynamic"\n')
@@ -407,8 +419,9 @@ class OpenVpnCmdConn(CommandConnection):
 
         self._create_client(full_username=self._full_username,
                 server=self._server, realm_data=self._realm_data,
-                leased_ip_address=res['ip-address'],
-                rebinding_timeout=res['rebinding_timeout'])
+                leased_ip_address=res['ip_address'],
+                rebinding_timeout=res['rebinding_timeout'],
+                lease_timeout=res['lease_timeout'])
 
     def _failure_handler(self):
         self.log.debug('DHCP request failed')
@@ -749,7 +762,7 @@ def main():
             parse_username_clb=parse_username.parse_username)
 
     def create_vpn_cmd_conn(sloop, sock):
-        return OpenVpnCmdConn(sloop, sock,
+        return OvpnCmdConn(sloop, sock,
                 realms_data=realms_data,
                 servers=servers,
                 create_client_clb=client_mgr.create_client,

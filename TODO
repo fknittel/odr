@@ -8,10 +8,8 @@ Planned features / unsolved issues / wishlist items
   + Pass full_username on to DHCP server as client-identifer, allowing the
     DHCP server to send static routes depending on the full_username.
 
-* If a client's lease timeout has been reached, disconnect the client instead of
-  attempting to refresh an address. (It's just too late.)
-
-* Refactor ovpn code that requests fresh leases / renews leases.
+* Refactor ovpn code that requests fresh leases / renews leases. (Avoid
+  spreading the code across OvpnClient, OvpnClientManager and OvpnCmdConn)
 
 * Try to implement some mechanism to determine if an IP address is already in
   use (especially by non-OpenVPN users).

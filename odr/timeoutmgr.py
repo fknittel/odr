@@ -18,7 +18,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import time
-import logging
 
 
 class TimeoutObject(object):
@@ -42,7 +41,6 @@ class TimeoutManager(object):
     """
     def __init__(self):
         self._timeout_objects = []
-        self.log = logging.getLogger('timeoutmgr')
 
     def add_rel_timeout(self, timeout_secs, timeout_func):
         """Adds a timeout event for a specific time.  On timeout, the function
@@ -75,7 +73,6 @@ class TimeoutManager(object):
 
         @param timeout_object: Object that should be added.
         """
-        self.log.debug("adding timeout object %s" % repr(timeout_object))
         self._timeout_objects.append(timeout_object)
 
     def del_timeout_object(self, timeout_object):
@@ -84,7 +81,6 @@ class TimeoutManager(object):
 
         @param timeout_object: Object that is to be removed.
         """
-        self.log.debug("removing timeout object %s" % repr(timeout_object))
         self._timeout_objects.remove(timeout_object)
 
     def check_timeouts(self):

@@ -233,8 +233,8 @@ class DhcpAddressRequest(object):
                 packet.GetOption('domain_name')))
 
         translate_ips = {
-                'yiaddr':'ip-address',
-                'subnet_mask':'subnet-mask',
+                'yiaddr':'ip_address',
+                'subnet_mask':'subnet_mask',
                 'router':'gateway',
             }
         for opt_name in translate_ips:
