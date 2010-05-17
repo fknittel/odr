@@ -407,8 +407,18 @@ class OvpnCmdConn(CommandConnection):
         if self._realm_data.vid is not None:
             self._config_f.write('vlan-pvid %d\n' % self._realm_data.vid)
         self._config_f.write('push "ip-win32 dynamic"\n')
-        self._config_f.write('push "route-gateway %s"\n' % (res['gateway']))
-        self._config_f.write('push "redirect-gateway def1"\n')
+        if 'static_routes' in res:
+            for network, netmask, gateway in res['static_routes']:
+                if network == '0.0.0.0' and netmask == '0.0.0.0':
+                    self._config_f.write('push "route-gateway %s"\n' % (
+                        gateway))
+                    self._config_f.write('push "redirect-gateway def1"\n')
+                else:
+                    self._config_f.write('push "route %s %s %s"\n' % (network,
+                        netmask, gateway))
+        elif 'gateway' in res:
+            self._config_f.write('push "route-gateway %s"\n' % (res['gateway']))
+            self._config_f.write('push "redirect-gateway def1"\n')
         for dns_ip in res['dns']:
             self._config_f.write('push "dhcp-option DNS %s"\n' % dns_ip)
         self._config_f.write('push "dhcp-option DOMAIN %s"\n' % res['domain'])

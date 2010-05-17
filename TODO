@@ -2,11 +2,8 @@ Planned features / unsolved issues / wishlist items
 
 * Allow an OpenVPN tunnel to provide only partial routing, instead of always
   providing the default route.
-  + Request DHCP rfc3442-classless-static-routes and convert to matching
-    push requests.
   + Per-realm flag whether or not to push the default route.
-  + Pass full_username on to DHCP server as client-identifer, allowing the
-    DHCP server to send static routes depending on the full_username.
+  + Allow static routes to be defined per realm.
 
 * Refactor ovpn code that requests fresh leases / renews leases. (Avoid
   spreading the code across OvpnClient, OvpnClientManager and OvpnCmdConn)

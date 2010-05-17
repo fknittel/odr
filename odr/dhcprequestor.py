@@ -124,7 +124,9 @@ class DhcpAddressRequest(object):
         return packet
 
     def _add_option_list(self, packet):
-        packet.AddLine("parameter_request_list: subnet_mask,router," \
+        # 'classless_static_route' must be requested before 'router'.
+        packet.AddLine("parameter_request_list: subnet_mask," \
+                "classless_static_route,router," \
                 "domain_name_server,domain_name,renewal_time_value," \
                 "rebinding_time_value")
 
@@ -238,6 +240,8 @@ class DhcpAddressRequest(object):
                 'router':'gateway',
             }
         for opt_name in translate_ips:
+            if not packet.IsOption(opt_name):
+                continue
             val = packet.GetOption(opt_name)
             if len(val) == 4:
                 result[translate_ips[opt_name]] = str(ipv4(val))
@@ -248,6 +252,17 @@ class DhcpAddressRequest(object):
         while len(dns_list) >= 4:
             dns.append(str(ipv4(dns_list[:4])))
             dns_list = dns_list[4:]
+
+        if packet.IsOption('classless_static_route'):
+            static_routes = parse_classless_static_routes(
+                    packet.GetOption('classless_static_route'))
+            if static_routes is not None:
+                result['static_routes'] = static_routes
+                if 'gateway' in result:
+                    # We MUST ignore a regular default route if static routes
+                    # are sent.
+                    del result['gateway']
+            del static_routes
 
         # Calucate lease timeouts
         lease_delta = ipv4(packet.GetOption('ip_address_lease_time')).int()
@@ -534,3 +549,53 @@ class DhcpAddressRequestorManager(object):
                     device))
             return None
         return self._requestors_by_device_and_ip[listen_pair]
+
+
+def network_mask(mask_width):
+    """Build the network mask matching the specified network mask bit width.
+
+    @return: Returns the network mask as list of integers.
+    """
+    mask = [255] * max(mask_width / 8, 0)
+    if len(mask) < 4:
+        mask += [255 - (2**(8 - (mask_width % 8)) - 1)]
+    mask += [0] * (4 - len(mask))
+    return mask
+
+
+def parse_classless_static_routes(data):
+    """Parses an array of ints, representing classless static routes according
+    to RFC 3442, into a list of tuples with full IP addresses.
+
+    @return: Returns a tuple consisting of network, netmask and router.
+    """
+    routes = []
+    remaining = data[:]
+    while len(remaining) >= 5:
+        mask_width = remaining.pop(0)
+
+        significant_octets = (mask_width - 1) / 8 + 1
+        if significant_octets > 4:
+            # Invalid number of octets.
+            return None
+        print 'significant_octets: %d' % significant_octets
+
+        network = remaining[:significant_octets] + \
+                [0] * (4 - significant_octets)
+        remaining = remaining[significant_octets:]
+
+        mask = network_mask(mask_width)
+
+        gateway = remaining[:4]
+        remaining = remaining[4:]
+
+        if len(gateway) != 4:
+            # List too short, malformed gateway.
+            return None
+        routes.append((ipv4(network).str(), ipv4(mask).str(),
+                ipv4(gateway).str()))
+
+    if len(remaining) > 0:
+        # Failed to properly parse the option.
+        return None
+    return routes
