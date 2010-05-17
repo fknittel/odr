@@ -272,7 +272,8 @@ class OvpnClientManager(object):
             if client_data.common_name not in self._clients_by_username:
                 # New client!  Assume pessimistic last lease update time.  We're
                 # probably recovering from a daemon restart.
-                self._create_detected_client(client_data.common_name, server)
+                self._create_detected_client(client_data.common_name, server,
+                        client_data.virtual_address)
 
         for client in self._clients_by_server[server].values():
             if client.full_username not in client_data_by_username:
@@ -304,7 +305,7 @@ class OvpnClientManager(object):
         self.log.debug('disconnected %s' % client)
         self._del_client(client)
 
-    def _create_detected_client(self, full_username, server):
+    def _create_detected_client(self, full_username, server, leased_ip_address):
         """Create a client instance without knowledge of the last DHCP lease
         refresh time.  Therefore, the client's next lease update time is set to
         "soon".
@@ -336,7 +337,7 @@ class OvpnClientManager(object):
         self.create_client(server=server,
                 full_username=full_username,
                 realm_data=realm_data,
-                leased_ip_address=client_data.virtual_address,
+                leased_ip_address=leased_ip_address,
                 rebinding_timeout=rebinding_timeout)
 
 
@@ -713,6 +714,11 @@ def main():
     requestor_mgr = odr.dhcprequestor.DhcpAddressRequestorManager()
 
     servers = read_servers(cfg, sloop)
+
+    for server in servers.values():
+        ovpn.OvpnServerSupervisor(timeout_mgr=weakref.proxy(timeout_mgr),
+                server=weakref.proxy(server),
+                timeout=30)
 
     def start_dhcp_address_request(device, local_ip, **kwargs):
         requestor = requestor_mgr.get_requestor(device, local_ip)

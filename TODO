@@ -8,18 +8,10 @@ Planned features / unsolved issues / wishlist items
   + Pass full_username on to DHCP server as client-identifer, allowing the
     DHCP server to send static routes depending on the full_username.
 
-* Periodically attempt to re-establish OpenVPN management connection after EOF.
-  + Without re-establishing the connection, an OpenVPN restart causes the
-    connection to be lost.
-  + Same probably goes for initial establishing.
-  + A single down OpenVPN server instance shouldn't cause odrd to fail, as
-    there might be other instances that need to be served.
+* If a client's lease timeout has been reached, disconnect the client instead of
+  attempting to refresh an address. (It's just too late.)
 
-* Refresh DHCP leases.
-  + Track ovpn disconnect events.
-  + If lease timeout has been reached, disconnect the client instead of
-    attempting to refresh an address. (It's just too late.)
-  + Refactor code.
+* Refactor ovpn code that requests fresh leases / renews leases.
 
 * Try to implement some mechanism to determine if an IP address is already in
   use (especially by non-OpenVPN users).
