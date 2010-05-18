@@ -257,11 +257,19 @@ class DhcpAddressRequest(object):
             static_routes = parse_classless_static_routes(
                     packet.GetOption('classless_static_route'))
             if static_routes is not None:
-                result['static_routes'] = static_routes
                 if 'gateway' in result:
                     # We MUST ignore a regular default route if static routes
                     # are sent.
                     del result['gateway']
+                # Find and filter out default route (if any).  And set it as
+                # the new gateway parameter.
+                result['static_routes'] = []
+                for network, netmask, gateway in static_routes:
+                    if network == '0.0.0.0' and netmask == '0.0.0.0':
+                        result['gateway'] = gateway
+                    else:
+                        result['static_routes'].append((network, netmask,
+                            gateway))
             del static_routes
 
         # Calucate lease timeouts
