@@ -65,13 +65,16 @@ class CommandConnection(object):
     MAX_NUM_FDS = 8
     MAX_MSG_SIZE = 1024
 
-    def __init__(self, sloop, socket):
+    def __init__(self, sloop, sock, **kwargs):
         """\
         @param sloop: Instance of the socket loop.
-        @param socket: Socket that will be used for communication.
+        @param sock: Socket that will be used for communication.
         """
+        super(CommandConnection, self).__init__(sloop=sloop, sock=sock,
+                **kwargs)
         self._sloop = sloop
-        self._socket = socket
+        self._socket = sock
+        self._sloop.add_socket_handler(self)
 
     def __del__(self):
         self.log.debug('destructing CommandConnection')
@@ -203,7 +206,6 @@ class CommandConnectionListener(object):
                 sock.close()
                 return
         conn = self._factory(sloop=self._sloop, sock=sock)
-        self._sloop.add_socket_handler(conn)
 
 
 def getsockpeercred(sock):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # vim:set encoding=utf-8 ft=python ts=8 sw=4 sts=4 et cindent:
 
-# ovpn-client-connect
+# odr-ovpn-disconnect -- Called by the OpenVPN client-disconnect hook.
 #
 # Copyright © 2010 Fabian Knittel <fabian.knittel@avona.com>
 #
@@ -19,42 +19,37 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-import sys
 import socket
 import odr.ovpn as ovpn
 import odr.cmdconnection as cmdconnection
 import fdsend
 
+SCRIPT_NAME = 'odr-ovpn-disconnect'
 CMD_SOCKET = '/var/run/odr/cmd.sock'
 
-class flushedstream(object):
-    def __init__(self, f):
-        self.f = f
-    def write(self, x):
-        self.f.write(x)
-        self.f.flush()
-sys.stdout = flushedstream(sys.stdout)
-sys.stderr = flushedstream(sys.stderr)
+def main():
+    #
+    # Gather configuration
+    #
 
+    full_username = os.environ['username']
+    daemon_name = ovpn.determine_daemon_name(script_name=SCRIPT_NAME)
 
-cfg_f = open(os.environ['client_connect_config_file'], 'wb')
-ret_f = open(os.environ['client_connect_deferred_file'], 'wb')
-full_username = os.environ['username']
+    #
+    # Build and submit command
+    #
 
-s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.connect(CMD_SOCKET)
+    params = {'full_username':full_username}
+    if daemon_name is not None:
+        params['daemon_name'] = daemon_name
 
-ovpn.write_deferred_ret_file(ret_f, ovpn.CC_RET_DEFERRED)
-try:
-    fdsend.sendfds(s, cmdconnection.pack_cmd('request', {
-            'full_username':full_username,
-            'ret_file_idx':'0',
-            'config_file_idx':'1'}), fds=[ret_f, cfg_f])
-
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(CMD_SOCKET)
+    fdsend.sendfds(s, cmdconnection.pack_cmd('disconnect', params))
     ret, _ = fdsend.recvfds(s, 1024, numfds=0)
-    print 'Received: %s' % ret
     if ret != 'OK':
-        raise RuntimeError('starting dhcp request failed')
-except:
-    ovpn.write_deferred_ret_file(ret_f, ovpn.CC_RET_FAILED)
-    raise
+        raise RuntimeError('sending disconnect notification failed ' \
+                '(ret: "%s")' % ret)
+
+if __name__ == '__main__':
+    main()
