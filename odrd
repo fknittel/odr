@@ -481,10 +481,15 @@ class OvpnCmdConn(CommandConnection):
                     res['gateway']))
             self._config_f.write('push "redirect-gateway def1"\n')
 
+        static_routes = []
+        if self._realm_data.static_routes is not None:
+            static_routes += self._realm_data.static_routes
         if 'static_routes' in res:
-            for network, netmask, gateway in res['static_routes']:
+            static_routes += res['static_routes']
+        if len(static_routes) > 0:
+            for network, netmask, gateway in static_routes:
                 self._config_f.write('push "route %s %s %s"\n' % (network,
-                    netmask, gateway))
+                        netmask, gateway))
 
         for dns_ip in res['dns']:
             self._config_f.write('push "dhcp-option DNS %s"\n' % dns_ip)
@@ -629,12 +634,12 @@ def cfg_getint_def(cfg, sect, opt, default=None):
     else:
         return default
 
-def cfg_getbool_def(cfg, sect, opt, default=None):
+def cfg_getboolean_def(cfg, sect, opt, default=None):
     """Small helper to allow configuration options with program-defined
     defaults.
     """
     if cfg.has_option(sect, opt):
-        return cfg.getbool(sect, opt)
+        return cfg.getboolean(sect, opt)
     else:
         return default
 
@@ -724,7 +729,7 @@ def parse_static_routes(data):
             raise RuntimeError('Invalid static route format: "%s' % \
                     static_route_str)
         network, mask_width = network.split('/')
-        netmask = network_mask(mask_width)
+        netmask = network_mask(int(mask_width))
         static_routes.append((network, netmask, gateway))
     return static_routes
 
@@ -765,7 +770,7 @@ def read_realms(cfg):
         realm_data.dhcp_listening_ip = cfg_get_def(cfg, sect,
                 'dhcp_listening_ip')
 
-        realm_data.provide_default_route = cfg_getbool_def(cfg, sect,
+        realm_data.provide_default_route = cfg_getboolean_def(cfg, sect,
                 'provide_default_route', True)
 
         realm_data.default_gateway = cfg_get_def(cfg, sect, 'default_gateway')
@@ -795,6 +800,9 @@ def drop_caps(user=None, group=None, caps=None):
     @param group: The target group
     @param caps: List of capabilities to retain.
     """
+    if caps is None:
+        caps = []
+
     if group is not None:
         # Switch to new GID.
         logging.debug('Switching to group %s', str(group))
@@ -810,7 +818,7 @@ def drop_caps(user=None, group=None, caps=None):
         logging.debug('Switching to user %s', str(user))
         os.setuid(user_to_uid(user))
 
-    if caps is not None and len(caps) > 0:
+    if len(caps) > 0:
         logging.debug('Restricting to capabilities "%s"', ', '.join(caps))
         # Some capabilities might be permitted but not effective, so explicitly
         # set them to effective here.

@@ -592,8 +592,7 @@ def parse_classless_static_routes(data):
         if len(gateway) != 4:
             # List too short, malformed gateway.
             return None
-        routes.append((ipv4(network).str(), ipv4(mask).str(),
-                ipv4(gateway).str()))
+        routes.append((ipv4(network).str(), mask, ipv4(gateway).str()))
 
     if len(remaining) > 0:
         # Failed to properly parse the option.

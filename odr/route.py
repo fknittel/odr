@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from pydhcplib.type_ipv4 import ipv4
+
 
 def network_mask(mask_width):
     """Build the network mask matching the specified network mask bit width.
@@ -27,5 +29,5 @@ def network_mask(mask_width):
     if len(mask) < 4:
         mask += [255 - (2**(8 - (mask_width % 8)) - 1)]
     mask += [0] * (4 - len(mask))
-    return mask
+    return ipv4(mask).str()
 
