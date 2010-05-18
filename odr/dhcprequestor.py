@@ -578,7 +578,6 @@ def parse_classless_static_routes(data):
         if significant_octets > 4:
             # Invalid number of octets.
             return None
-        print 'significant_octets: %d' % significant_octets
 
         network = remaining[:significant_octets] + \
                 [0] * (4 - significant_octets)
