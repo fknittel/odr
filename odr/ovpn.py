@@ -37,7 +37,7 @@ def write_deferred_ret_file(fp, val):
     @param val: One of the CC_RET_* constants.
     """
     fp.seek(0)
-    fp.write('%d' % val);
+    fp.write('%d' % val)
     fp.flush()
     os.fsync(fp.fileno())
 
@@ -95,6 +95,7 @@ class OvpnServer(object):
 
         self.log = logging.getLogger('ovpnsrv')
         self._socket = None
+        self._cmd_state = StateQueue(idle_state=_OvpnIdleState())
 
         self.connect_to_mgmt()
 
@@ -121,8 +122,7 @@ class OvpnServer(object):
         self._socket = LineSocket(sock)
         self._sloop.add_socket_handler(self)
 
-        self._cmd_state = StateQueue(idle_state=_OvpnIdleState())
-        self._cmd_state.add(_OvpnWaitConnectState(self, self._on_connected))
+        self._cmd_state.add(_OvpnWaitConnectState(self._on_connected))
 
     def close_mgmt(self):
         self._sloop.del_socket_handler(self)
@@ -146,7 +146,7 @@ class OvpnServer(object):
             self._socket.close()
 
     def __cmp__(self, other):
-        return cmp(self._name, other._name)
+        return cmp(self.name, other.name)
 
     def __hash__(self):
         return hash(self._name)
@@ -222,13 +222,7 @@ class OvpnServer(object):
         self._cmd_state.add(_OvpnListClientsState(self, list_done_clb))
 
 
-class _OvpnStateInterface(object):
-    def handle_line(self, line):
-        raise RuntimeError('called purely virtual handle_line method of %s' % \
-                repr(self))
-
-
-class _OvpnIdleState(_OvpnStateInterface):
+class _OvpnIdleState(object):
     """The default state of the management console.  Takes all lines, ignores
     them and wants to continue forever.
     """
@@ -236,11 +230,10 @@ class _OvpnIdleState(_OvpnStateInterface):
         return True
 
 
-class _OvpnWaitConnectState(_OvpnStateInterface):
+class _OvpnWaitConnectState(object):
     """Waits for an OpenVPN management socket to to connect.
     """
-
-    def __init__(self, ovpn, done_clb):
+    def __init__(self, done_clb):
         self._done = done_clb
 
     def handle_line(self, line):
@@ -248,7 +241,7 @@ class _OvpnWaitConnectState(_OvpnStateInterface):
         return False
 
 
-class _OvpnListClientsState(_OvpnStateInterface):
+class _OvpnListClientsState(object):
     """Uses an OpenVPN management socket to asynchronously request the client
     list.
     """
@@ -264,14 +257,10 @@ class _OvpnListClientsState(_OvpnStateInterface):
         cl = OvpnClientConnData(server=self._ovpn)
         d = line.split(',')
         cl.common_name = d[1]
-        cl.real_address = d[2]
         if d[3] != '':
             cl.virtual_address = d[3]
         else:
             cl.virtual_address = None
-        cl.bytes_rcvd = int(d[4])
-        cl.bytes_sent = int(d[5])
-        cl.connected_since = int(d[7])
         self._clients.append(cl)
 
     def handle_line(self, line):
@@ -283,7 +272,7 @@ class _OvpnListClientsState(_OvpnStateInterface):
         return True
 
 
-class _OvpnDisconnectClientsState(_OvpnStateInterface):
+class _OvpnDisconnectClientsState(object):
     """Uses an OpenVPN management socket to asynchronously disconnect a client.
     """
 
@@ -309,9 +298,11 @@ class OvpnServerSupervisor(object):
         self._timeout_mgr = timeout_mgr
         self._server = server
         self._timeout = timeout
+
+        self._timeout_time = None
         self.log = logging.getLogger('ovpnserversup')
-        self._add_myself()
         self.log.debug('watching server connection %s' % self._server)
+        self._add_myself()
 
     def _add_myself(self):
         import time

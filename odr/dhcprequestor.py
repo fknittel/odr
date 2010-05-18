@@ -18,7 +18,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import random
-import weakref
 import time
 import logging
 import socket
@@ -90,6 +89,9 @@ class DhcpAddressRequest(object):
 
         self._xid = ipv4([random.randint(0, 255) for i in range(4)])
 
+        # Current packet state.
+        self._state = None
+
         # What's the current timeout?  (Will be increased after each timeout
         # event.)
         self._timeout = None
@@ -97,6 +99,8 @@ class DhcpAddressRequest(object):
         self._timeout_time = None
         # What was the contents of the last packet?  (Used for retry.)
         self._last_packet = None
+        # Number of packet retries
+        self._packet_retries = 0
 
     def __del__(self):
         self.log.debug('xid %d destroyed' % self.xid)
@@ -231,8 +235,7 @@ class DhcpAddressRequest(object):
         self._timeout_mgr.del_timeout_object(self)
         self._requestor.del_request(self)
         result = {}
-        result['domain'] = ''.join(map(chr,
-                packet.GetOption('domain_name')))
+        result['domain'] = strlist(packet.GetOption('domain_name')).str()
 
         translate_ips = {
                 'yiaddr':'ip_address',
@@ -607,3 +610,4 @@ def parse_classless_static_routes(data):
         # Failed to properly parse the option.
         return None
     return routes
+

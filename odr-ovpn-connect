@@ -19,7 +19,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-import sys
 import socket
 import odr.ovpn as ovpn
 import odr.cmdconnection as cmdconnection
@@ -28,36 +27,40 @@ import fdsend
 SCRIPT_NAME = 'odr-ovpn-connect'
 CMD_SOCKET = '/var/run/odr/cmd.sock'
 
-#
-# Gather configuration
-#
+def main():
+    #
+    # Gather configuration
+    #
 
-cfg_f = open(os.environ['client_connect_config_file'], 'wb')
-ret_f = open(os.environ['client_connect_deferred_file'], 'wb')
-full_username = os.environ['username']
-daemon_name = ovpn.determine_daemon_name(script_name=SCRIPT_NAME)
+    cfg_f = open(os.environ['client_connect_config_file'], 'wb')
+    ret_f = open(os.environ['client_connect_deferred_file'], 'wb')
+    full_username = os.environ['username']
+    daemon_name = ovpn.determine_daemon_name(script_name=SCRIPT_NAME)
 
-#
-# Build and submit command
-#
+    #
+    # Build and submit command
+    #
 
-params = {'full_username':full_username,
-        'ret_file_idx':'0',
-        'config_file_idx':'1'}
-if daemon_name is not None:
-    params['daemon_name'] = daemon_name
+    params = {'full_username':full_username,
+            'ret_file_idx':'0',
+            'config_file_idx':'1'}
+    if daemon_name is not None:
+        params['daemon_name'] = daemon_name
 
-s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.connect(CMD_SOCKET)
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(CMD_SOCKET)
 
-ovpn.write_deferred_ret_file(ret_f, ovpn.CC_RET_DEFERRED)
-try:
-    fdsend.sendfds(s, cmdconnection.pack_cmd('request', params),
-            fds=[ret_f, cfg_f])
+    ovpn.write_deferred_ret_file(ret_f, ovpn.CC_RET_DEFERRED)
+    try:
+        fdsend.sendfds(s, cmdconnection.pack_cmd('request', params),
+                fds=[ret_f, cfg_f])
 
-    ret, _ = fdsend.recvfds(s, 1024, numfds=0)
-    if ret != 'OK':
-        raise RuntimeError('starting dhcp request failed (ret: "%s")' % ret)
-except:
-    ovpn.write_deferred_ret_file(ret_f, ovpn.CC_RET_FAILED)
-    raise
+        ret, _ = fdsend.recvfds(s, 1024, numfds=0)
+        if ret != 'OK':
+            raise RuntimeError('starting dhcp request failed (ret: "%s")' % ret)
+    except:
+        ovpn.write_deferred_ret_file(ret_f, ovpn.CC_RET_FAILED)
+        raise
+
+if __name__ == '__main__':
+    main()

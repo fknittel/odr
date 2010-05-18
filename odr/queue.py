@@ -22,26 +22,44 @@ class StateQueue(object):
     """Manages a simple FIFO state queue with an idle state in case the queue is
     empty.
     """
+
     def __init__(self, idle_state):
+        """\
+        @param idle_state: The state to use while the queue is otherwise empty.
+        """
         self._idle = idle_state
-        self.clear()
+        self._queue = []
+        self._current = self._idle
 
     @property
     def current(self):
+        """@return: Returns the currently active state.  Might be the idle
+            state.
+        """
         return self._current
 
     def add(self, new_state):
+        """Add a new state to the FIFO queue.  Might be turned into the active
+        state in case the queue is currently empty.
+        @param new_state: The new state to add.
+        """
         if len(self._queue) == 0:
             self._current = new_state
         else:
             self._queue.append(new_state)
 
     def current_done(self):
+        """Mark the currently active state as done.  Moves to the next state
+        in the queue.  Does nothing in case the current state is already the
+        idle state.
+        """
         if len(self._queue) == 0:
             self._current = self._idle
         else:
             self._current = self._queue.pop(0)
 
     def clear(self):
+        """Clears the queue without waiting for any states to finish.
+        """
         self._queue = []
         self._current = self._idle

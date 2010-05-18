@@ -27,25 +27,29 @@ import fdsend
 SCRIPT_NAME = 'odr-ovpn-disconnect'
 CMD_SOCKET = '/var/run/odr/cmd.sock'
 
-#
-# Gather configuration
-#
+def main():
+    #
+    # Gather configuration
+    #
 
-full_username = os.environ['username']
-daemon_name = ovpn.determine_daemon_name(script_name=SCRIPT_NAME)
+    full_username = os.environ['username']
+    daemon_name = ovpn.determine_daemon_name(script_name=SCRIPT_NAME)
 
-#
-# Build and submit command
-#
+    #
+    # Build and submit command
+    #
 
-params = {'full_username':full_username}
-if daemon_name is not None:
-    params['daemon_name'] = daemon_name
+    params = {'full_username':full_username}
+    if daemon_name is not None:
+        params['daemon_name'] = daemon_name
 
-s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.connect(CMD_SOCKET)
-fdsend.sendfds(s, cmdconnection.pack_cmd('disconnect', params))
-ret, _ = fdsend.recvfds(s, 1024, numfds=0)
-if ret != 'OK':
-    raise RuntimeError('sending disconnect notification failed (ret: "%s")' % \
-            ret)
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(CMD_SOCKET)
+    fdsend.sendfds(s, cmdconnection.pack_cmd('disconnect', params))
+    ret, _ = fdsend.recvfds(s, 1024, numfds=0)
+    if ret != 'OK':
+        raise RuntimeError('sending disconnect notification failed ' \
+                '(ret: "%s")' % ret)
+
+if __name__ == '__main__':
+    main()

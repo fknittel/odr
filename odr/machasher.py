@@ -48,6 +48,9 @@ def hash_login_to_mac(login):
     return mac_addr
 
 
-if __name__ == '__main__':
+def _main():
     mac_addr = hash_login_to_mac(sys.argv[1])
     print ("%02x" +":%02x" *5) % tuple(mac_addr)
+
+if __name__ == '__main__':
+    _main()
