@@ -407,7 +407,7 @@ class OvpnCmdConn(CommandConnection):
         if self._realm_data.vid is not None:
             self._config_f.write('vlan-pvid %d\n' % self._realm_data.vid)
         self._config_f.write('push "ip-win32 dynamic"\n')
-        if 'gateway' in res:
+        if 'gateway' in res and self._realm_data.provide_default_route:
             self._config_f.write('push "route-gateway %s"\n' % (res['gateway']))
             self._config_f.write('push "redirect-gateway def1"\n')
         if 'static_routes' in res:
@@ -540,6 +540,14 @@ def cfg_getint_def(cfg, sect, opt, default=None):
     else:
         return default
 
+def cfg_getbool_def(cfg, sect, opt, default=None):
+    """Small helper to allow configuration options with program-defined
+    defaults."""
+    if cfg.has_option(sect, opt):
+        return cfg.getbool(sect, opt)
+    else:
+        return default
+
 def split_cfg_list(val):
     return [v.strip() for v in val.split(',') if (len(v.strip()) > 0)]
 
@@ -618,6 +626,9 @@ def read_realms(cfg):
                 'dhcp_listening_device')
         realm_data.dhcp_listening_ip = cfg_get_def(cfg, sect,
                 'dhcp_listening_ip')
+
+        realm_data.provide_default_route = cfg_getbool_def(cfg, sect,
+                'provide_default_route', True)
 
         if realm_data.dhcp_listening_device is not None and \
                 realm_data.dhcp_listening_ip is None:

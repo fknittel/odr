@@ -2,7 +2,6 @@ Planned features / unsolved issues / wishlist items
 
 * Allow an OpenVPN tunnel to provide only partial routing, instead of always
   providing the default route.
-  + Per-realm flag whether or not to push the default route.
   + Allow static routes to be defined per realm.
 
 * Refactor ovpn code that requests fresh leases / renews leases. (Avoid
