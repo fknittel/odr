@@ -1,3 +1,19 @@
+odr (0.8-1) fsmi-lenny; urgency=low
+
+  * New upstream release:
+    + DHCP packets and states more standards compliant in various ways.
+    + Uses full_username as client_identifier instead of creating a fake MAC
+      address.
+    + Randomised exponential backoff algorithm for DHCP resending.
+    + DHCP lease tracking and refreshing.
+    + Hook script odr-ovpn renamed to odr-ovpn-connect.
+    + Added hook script odr-ovpn-disconnect.
+    + Support classless static routes via DHCP (RFC 3442).
+    + Add per-realm switch "provide_default_route".
+    + Static routes and default route definable per realm.
+
+ -- Fabian Knittel <fabian.knittel@avona.com>  Tue, 18 May 2010 23:19:07 +0200
+
 odr (0.7-1) fsmi-lenny; urgency=low
 
   * New upstream release:
