@@ -39,6 +39,7 @@ from odr.timeoutmgr import TimeoutManager
 from odr.socketloop import SocketLoop
 import odr.dhcprequestor
 from odr.weakmethod import WeakBoundMethod
+from odr.route import network_mask
 
 
 CONFIG_FILE = '/etc/odr.conf'
@@ -462,21 +463,33 @@ class OvpnCmdConn(CommandConnection):
 
         self.log.debug('writing OpenVPN client configuration')
         self._config_f.seek(0)
+
         self._config_f.write('ifconfig-push %s %s\n' % (res['ip_address'],
                 res['subnet_mask']))
+        self._config_f.write('push "ip-win32 dynamic"\n')
+
         if self._realm_data.vid is not None:
             self._config_f.write('vlan-pvid %d\n' % self._realm_data.vid)
-        self._config_f.write('push "ip-win32 dynamic"\n')
-        if 'gateway' in res and self._realm_data.provide_default_route:
-            self._config_f.write('push "route-gateway %s"\n' % (res['gateway']))
+
+        if self._realm_data.provide_default_route and ('gateway' in res or \
+                self._realm_data.default_gateway is not None):
+            if self._realm_data.default_gateway is not None:
+                self._config_f.write('push "route-gateway %s"\n' % (
+                    self._realm_data.default_gateway))
+            else:
+                self._config_f.write('push "route-gateway %s"\n' % (
+                    res['gateway']))
             self._config_f.write('push "redirect-gateway def1"\n')
+
         if 'static_routes' in res:
             for network, netmask, gateway in res['static_routes']:
                 self._config_f.write('push "route %s %s %s"\n' % (network,
                     netmask, gateway))
+
         for dns_ip in res['dns']:
             self._config_f.write('push "dhcp-option DNS %s"\n' % dns_ip)
         self._config_f.write('push "dhcp-option DOMAIN %s"\n' % res['domain'])
+
         self._config_f.flush()
         os.fsync(self._config_f.fileno())
 
@@ -625,12 +638,15 @@ def cfg_getbool_def(cfg, sect, opt, default=None):
     else:
         return default
 
-def split_cfg_list(val):
-    """Split a string along "," characters - ignoring any spaces surrounding the
-    commas.
+def split_cfg_list(val, split=','):
+    """Split a string along "split" characters - ignoring any spaces
+    surrounding the split characters.
+    @param val: The string to split at the split characters.
+    @param split: Optional split characters to use for splitting.  Defaults to
+        ",".
     @return: Returns a list of strings.
     """
-    return [v.strip() for v in val.split(',') if (len(v.strip()) > 0)]
+    return [v.strip() for v in val.split(split) if (len(v.strip()) > 0)]
 
 def cfg_iterate(cfg, section_type):
     """Iterate over all config sections who's section names are prefixed with
@@ -696,6 +712,23 @@ def get_ip_for_iface(iface):
     return addrs[netifaces.AF_INET][0]['addr']
 
 
+def parse_static_routes(data):
+    """Parses a string of the form
+      0.0.0.0/0 via 10.0.98.120, 10.0.97.0/24 via 10.0.98.121
+    @return: Returns a list of network, netmask and gateway tuples.
+    """
+    static_routes = []
+    for static_route_str in split_cfg_list(data):
+        network, via, gateway = split_cfg_list(static_route_str, split=' ')
+        if via != 'via':
+            raise RuntimeError('Invalid static route format: "%s' % \
+                    static_route_str)
+        network, mask_width = network.split('/')
+        netmask = network_mask(mask_width)
+        static_routes.append((network, netmask, gateway))
+    return static_routes
+
+
 class RealmData(object):
     """A RealmData object contains all data relevant for a specific realm.
     The attributes are injected at configuration-load-time.
@@ -707,6 +740,8 @@ class RealmData(object):
         self.dhcp_listening_device = None
         self.dhcp_listening_ip = None
         self.provide_default_route = None
+        self.default_gateway = None
+        self.static_routes = None
         self.dhcp_server_ips = None
         self.expected_dhcp_lease_time = None
 
@@ -732,6 +767,10 @@ def read_realms(cfg):
 
         realm_data.provide_default_route = cfg_getbool_def(cfg, sect,
                 'provide_default_route', True)
+
+        realm_data.default_gateway = cfg_get_def(cfg, sect, 'default_gateway')
+        realm_data.static_routes = parse_static_routes(cfg_get_def(cfg, sect,
+                'static_routes', ''))
 
         if realm_data.dhcp_listening_device is not None and \
                 realm_data.dhcp_listening_ip is None:

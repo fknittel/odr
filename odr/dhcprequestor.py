@@ -23,6 +23,7 @@ import logging
 import socket
 import IN
 import errno
+from odr.route import network_mask
 
 from pydhcplib.dhcp_packet import DhcpPacket
 from pydhcplib.type_ipv4 import ipv4
@@ -560,18 +561,6 @@ class DhcpAddressRequestorManager(object):
                     device))
             return None
         return self._requestors_by_device_and_ip[listen_pair]
-
-
-def network_mask(mask_width):
-    """Build the network mask matching the specified network mask bit width.
-
-    @return: Returns the network mask as list of integers.
-    """
-    mask = [255] * max(mask_width / 8, 0)
-    if len(mask) < 4:
-        mask += [255 - (2**(8 - (mask_width % 8)) - 1)]
-    mask += [0] * (4 - len(mask))
-    return mask
 
 
 def parse_classless_static_routes(data):
