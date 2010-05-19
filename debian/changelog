@@ -1,3 +1,10 @@
+odr (0.11-1) fsmi-lenny; urgency=low
+
+  * New upstream release:
+    + Allow logging to syslog.
+
+ -- Fabian Knittel <fabian.knittel@avona.com>  Thu, 20 May 2010 00:50:21 +0200
+
 odr (0.10-1) fsmi-lenny; urgency=low
 
   * New upstream release:
