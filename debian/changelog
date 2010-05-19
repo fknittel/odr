@@ -1,3 +1,9 @@
+odr (0.8-2) UNRELEASED; urgency=low
+
+  * Call "update-python-modules -p" in postinst before starting odrd.
+
+ -- Fabian Knittel <fabian.knittel@avona.com>  Wed, 19 May 2010 19:13:16 +0200
+
 odr (0.8-1) fsmi-lenny; urgency=low
 
   * New upstream release:

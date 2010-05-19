@@ -10,6 +10,9 @@ configure)
   getent passwd odr >/dev/null || \
     adduser --system --ingroup odr --home /nonexistent --no-create-home odr
 
+  # Prepare Python module namespace(s).
+  update-python-modules -p
+
   # enable service
   update-service --add /etc/sv/odr
 
