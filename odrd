@@ -32,6 +32,7 @@ import socket
 import random
 from optparse import OptionParser
 from ConfigParser import SafeConfigParser
+from functools import partial
 
 import odr.ovpn as ovpn
 from odr.cmdconnection import CommandConnection, CommandConnectionListener
@@ -274,8 +275,8 @@ class OvpnClientManager(object):
         """
         for server in self._servers.values():
             # Asynchronously retrieve the list of clients against which to sync.
-            server.poll_client_list(lambda client_data_list: \
-                    self._sync_clients_with(client_data_list, server))
+            server.poll_client_list(partial(self._sync_clients_with,
+                    server=server))
 
     def _on_sync_clients(self):
         """Timeout event handler to regularly sync clients.  See sync_clients().
