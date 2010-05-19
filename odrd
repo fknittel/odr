@@ -738,17 +738,88 @@ class RealmData(object):
     """A RealmData object contains all data relevant for a specific realm.
     The attributes are injected at configuration-load-time.
     """
-    def __init__(self, name):
+    def __init__(self, name, parent=None):
         self.name = name
-        self.vid = None
-        self.dhcp_local_port = None
-        self.dhcp_listening_device = None
-        self.dhcp_listening_ip = None
-        self.provide_default_route = None
-        self.default_gateway = None
-        self.static_routes = None
-        self.dhcp_server_ips = None
-        self.expected_dhcp_lease_time = None
+        if parent is not None:
+            self.vid = parent.vid
+            self.dhcp_local_port = parent.dhcp_local_port
+            self.dhcp_listening_device = parent.dhcp_listening_device
+            self.dhcp_listening_ip = parent.dhcp_listening_ip
+            self.provide_default_route = parent.provide_default_route
+            self.default_gateway = parent.default_gateway
+            self.static_routes = parent.static_routes
+            self.dhcp_server_ips = parent.dhcp_server_ips
+            self.expected_dhcp_lease_time = parent.expected_dhcp_lease_time
+        else:
+            self.vid = None
+            self.dhcp_local_port = 67
+            self.dhcp_listening_device = None
+            self.dhcp_listening_ip = None
+            self.provide_default_route = True
+            self.default_gateway = None
+            self.static_routes = None
+            self.dhcp_server_ips = None
+            self.expected_dhcp_lease_time = None
+
+
+def process_realm(cfg, realm_name, realms, delayed_realms):
+    sect = 'realm %s' % realm_name
+
+    logging.debug('processing realm "%s"', realm_name)
+    parent_realm_name = cfg_get_def(cfg, sect, 'include_realm')
+    if parent_realm_name is not None:
+        # Is the realm we depend on already loaded?
+        if parent_realm_name not in realms:
+            logging.debug('processing of realm "%s" delayed, because of ' \
+                    'dependency on "%s"', realm_name, parent_realm_name)
+            # No, so delay loading this realm and try again later.
+            delayed_realms.append(realm_name)
+            return
+        realm_data = RealmData(realm_name, parent=realms[parent_realm_name])
+    else:
+        realm_data = RealmData(realm_name)
+
+    realms[realm_name] = realm_data
+
+    realm_data.vid = cfg_getint_def(cfg, sect, 'vid', realm_data.vid)
+
+    realm_data.dhcp_local_port = cfg_getint_def(cfg, sect,
+            'dhcp_local_port', realm_data.dhcp_local_port)
+
+    if cfg.has_option(sect, 'dhcp_listening_device'):
+        realm_data.dhcp_listening_device = cfg.get(sect,
+                'dhcp_listening_device')
+        # If a device is explicitly set, the listening IP needs to be explicitly
+        # set too (or the implicit detection needs to be performed again).
+        realm_data.dhcp_listening_ip = None
+
+    realm_data.dhcp_listening_ip = cfg_get_def(cfg, sect,
+            'dhcp_listening_ip', realm_data.dhcp_listening_ip)
+
+    realm_data.provide_default_route = cfg_getboolean_def(cfg, sect,
+            'provide_default_route', realm_data.provide_default_route)
+
+    realm_data.default_gateway = cfg_get_def(cfg, sect, 'default_gateway',
+            realm_data.default_gateway)
+
+    if cfg.has_option(sect, 'static_routes'):
+        realm_data.static_routes = parse_static_routes(cfg.get(sect,
+                'static_routes'))
+
+    if realm_data.dhcp_listening_device is not None and \
+            realm_data.dhcp_listening_ip is None:
+        # We need to determine an IPv4 address on the specified network
+        # device.
+        realm_data.dhcp_listening_ip = \
+                get_ip_for_iface(realm_data.dhcp_listening_device)
+
+    if cfg.has_option(sect, 'dhcp_server_ips'):
+        realm_data.dhcp_server_ips = [socket.gethostbyname(i.strip()) for i in \
+                cfg.get(sect, 'dhcp_server_ips').split(',')]
+
+    realm_data.expected_dhcp_lease_time = \
+            cfg_getint_def(cfg, sect, 'expected_dhcp_lease_time',
+                    realm_data.expected_dhcp_lease_time)
 
 
 def read_realms(cfg):
@@ -756,39 +827,24 @@ def read_realms(cfg):
     RealmData objects.
     """
     realms = {}
+
+    delayed_realms = []
     for sect, realm_name in cfg_iterate(cfg, 'realm'):
-        realm_data = RealmData(realm_name)
-        realms[realm_name] = realm_data
+        process_realm(cfg, realm_name, realms, delayed_realms)
 
-        realm_data.vid = cfg_getint_def(cfg, sect, 'vid')
+    # Did we have any delays, due to dependencies between realms?  Process them
+    # now.
+    while len(delayed_realms) > 0:
+        new_delayed_realms = []
+        for delayed_realm in delayed_realms:
+            process_realm(cfg, delayed_realm, realms, new_delayed_realms)
 
-        realm_data.dhcp_local_port = cfg_getint_def(cfg, sect,
-                'dhcp_local_port', 67)
-
-        realm_data.dhcp_listening_device = cfg_get_def(cfg, sect,
-                'dhcp_listening_device')
-        realm_data.dhcp_listening_ip = cfg_get_def(cfg, sect,
-                'dhcp_listening_ip')
-
-        realm_data.provide_default_route = cfg_getboolean_def(cfg, sect,
-                'provide_default_route', True)
-
-        realm_data.default_gateway = cfg_get_def(cfg, sect, 'default_gateway')
-        realm_data.static_routes = parse_static_routes(cfg_get_def(cfg, sect,
-                'static_routes', ''))
-
-        if realm_data.dhcp_listening_device is not None and \
-                realm_data.dhcp_listening_ip is None:
-            # We need to determine an IPv4 address on the specified network
-            # device.
-            realm_data.dhcp_listening_ip = \
-                    get_ip_for_iface(realm_data.dhcp_listening_device)
-
-        realm_data.dhcp_server_ips = [socket.gethostbyname(i.strip()) for i in \
-                cfg.get(sect, 'dhcp_server_ips').split(',')]
-
-        realm_data.expected_dhcp_lease_time = \
-                cfg.getint(sect, 'expected_dhcp_lease_time')
+        # In case nothing changed, we have a dependency loop.
+        if len(delayed_realms) == len(new_delayed_realms):
+            logging.error('realm error: apparently recursive include ' \
+                    'relationships between: %s', ', '.join(delayed_realms))
+            return None
+        delayed_realms = new_delayed_realms
     return realms
 
 
@@ -906,6 +962,8 @@ def main():
                 caps=['net_raw', 'net_bind_service'])
 
     realms_data = read_realms(cfg)
+    if realms_data is None:
+        sys.exit(1)
 
     sloop = SocketLoop()
 
