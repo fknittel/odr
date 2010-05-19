@@ -471,14 +471,14 @@ class OvpnCmdConn(CommandConnection):
         if self._realm_data.vid is not None:
             self._config_f.write('vlan-pvid %d\n' % self._realm_data.vid)
 
+        if self._realm_data.default_gateway is not None:
+            self._config_f.write('push "route-gateway %s"\n' % (
+                self._realm_data.default_gateway))
+        else:
+            self._config_f.write('push "route-gateway %s"\n' % (
+                res['gateway']))
         if self._realm_data.provide_default_route and ('gateway' in res or \
                 self._realm_data.default_gateway is not None):
-            if self._realm_data.default_gateway is not None:
-                self._config_f.write('push "route-gateway %s"\n' % (
-                    self._realm_data.default_gateway))
-            else:
-                self._config_f.write('push "route-gateway %s"\n' % (
-                    res['gateway']))
             self._config_f.write('push "redirect-gateway def1"\n')
 
         static_routes = []
