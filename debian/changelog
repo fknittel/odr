@@ -1,3 +1,11 @@
+odr (0.10-1) fsmi-lenny; urgency=low
+
+  * New upstream release:
+    + Bugfix: Stop removing and re-adding detected clients.  (Caused by bug
+      in multi-server code.)
+
+ -- Fabian Knittel <fabian.knittel@avona.com>  Wed, 19 May 2010 19:57:37 +0200
+
 odr (0.9-1) fsmi-lenny; urgency=low
 
   * New upstream release:
