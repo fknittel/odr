@@ -930,6 +930,20 @@ def load_requestors(sloop, requestor_mgr, realms_data):
         return False
     return True
 
+def setup_logging(loglevel, use_syslog=False):
+    root = logging.getLogger()
+    root.setLevel(loglevel)
+
+    if use_syslog:
+        from logging.handlers import SysLogHandler
+        hdlr = SysLogHandler(address='/dev/log')
+    else:
+        hdlr = logging.StreamHandler()
+
+    fmt = logging.Formatter(logging.BASIC_FORMAT)
+    hdlr.setFormatter(fmt)
+    root.addHandler(hdlr)
+
 
 def main():
     prctl.set_name('odrd')
@@ -953,7 +967,7 @@ def main():
     loglevel = logging.INFO
     if options.debug:
         loglevel = logging.DEBUG
-    logging.basicConfig(level=loglevel)
+    setup_logging(loglevel, cfg_getboolean_def(cfg, 'daemon', 'syslog', False))
 
     if not options.keep_user:
         # Capability net_raw is needed for binding to network devices.
