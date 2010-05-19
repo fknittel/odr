@@ -554,7 +554,16 @@ class DhcpAddressRequestorManager(object):
             return
         self._requestors_by_device_and_ip[listen_pair] = requestor
 
+    def has_requestor(self, device, local_ip):
+        """@return: Returns True if the device and local_ip already has a
+        requestor.
+        """
+        return (device, local_ip) in self._requestors_by_device_and_ip
+
     def get_requestor(self, device, local_ip):
+        """@return: Returns the requestor matching the device and local_ip, or
+        None in case there is none.
+        """
         listen_pair = (device, local_ip)
         if listen_pair not in self._requestors_by_device_and_ip:
             self.log.error('request for unsupported local IP %s@%s' % (local_ip,

@@ -845,6 +845,35 @@ def read_servers(cfg, sloop):
     return servers
 
 
+def load_requestors(sloop, requestor_mgr, realms_data):
+    """Load all requestors, based on the existing realms.
+
+    @param sloop: Socket loop instance.
+    @param requestor_mgr: Requestor manager instance.
+    @param realms_data: Dictionary of all existing realms.
+    @return: Returns False in case an error occured while loading the
+        requestors.  Otherwise returns True.
+    """
+    try:
+        for realm_data in realms_data.values():
+            if requestor_mgr.has_requestor(realm_data.dhcp_listening_device,
+                    realm_data.dhcp_listening_ip):
+                # Skip creating requestor, a previous realm already did that.
+                continue
+
+            requestor = odr.dhcprequestor.DhcpAddressRequestor(
+                    listen_address=realm_data.dhcp_listening_ip,
+                    listen_port=realm_data.dhcp_local_port,
+                    listen_device=realm_data.dhcp_listening_device)
+            sloop.add_socket_handler(requestor)
+            requestor_mgr.add_requestor(requestor)
+    except odr.dhcprequestor.DhcpLocalAddressBindFailed, ex:
+        logging.error('Could not bind to DHCP listening address %s:%d@%s',
+                ex.args[0], ex.args[1], ex.args[2])
+        return False
+    return True
+
+
 def main():
     prctl.set_name('odrd')
     prctl.set_proctitle(' '.join(sys.argv))
@@ -960,17 +989,7 @@ def main():
                 auth_check=cmd_conn_auth_check)
         sloop.add_socket_handler(cmd_listener)
 
-    try:
-        for realm_data in realms_data.values():
-            requestor = odr.dhcprequestor.DhcpAddressRequestor(
-                    listen_address=realm_data.dhcp_listening_ip,
-                    listen_port=realm_data.dhcp_local_port,
-                    listen_device=realm_data.dhcp_listening_device)
-            sloop.add_socket_handler(requestor)
-            requestor_mgr.add_requestor(requestor)
-    except odr.dhcprequestor.DhcpLocalAddressBindFailed, ex:
-        logging.error('Could not bind to DHCP listening address %s:%d@%s',
-                ex.args[0], ex.args[1], ex.args[2])
+    if not load_requestors(sloop, requestor_mgr, realms_data):
         sys.exit(1)
 
     if not options.keep_user:
