@@ -1,5 +1,10 @@
 Planned features / unsolved issues / wishlist items
 
+* Improve logging:
+  + Info messages concerning connects and full_username, IP-address and VLAN-ID.
+  + Info messages concerning refreshs and disconnects.
+  + Debug logging to stderr, while info and above goes to syslog.
+
 * Refactor ovpn code that requests fresh leases / renews leases. (Avoid
   spreading the code across OvpnClient, OvpnClientManager and OvpnCmdConn)
 
