@@ -91,20 +91,26 @@ class OvpnClient(object):
     instance.
     """
 
+    STATE_AWAITING_LEASE = 1
+    STATE_WITH_LEASE = 2
+    STATE_REFRESHING_LEASE = 3
+    STATE_DISCONNECTED = 4
+
     def __init__(self, timeout_mgr, refresh_lease_clb, full_username,
-                server, realm_data, leased_ip_address=None,
-                rebinding_timeout=None, lease_timeout=None):
+                server, realm_data):
         self._timeout_mgr = timeout_mgr
         self._refresh_lease = refresh_lease_clb
         self.full_username = full_username
         self.server = server
         self._realm_data = realm_data
-        self._leased_ip_address = leased_ip_address
-        self._rebinding_timeout = rebinding_timeout
-        self._lease_timeout = lease_timeout
 
         self.log = logging.getLogger('ovpnclient')
-        self._killed = False
+        self._state = self.STATE_AWAITING_LEASE
+        self._leased_ip_address = None
+        self._rebinding_timeout = None
+        self._lease_timeout = None
+
+        self._notifications = {}
 
     def __str__(self):
         return '%s on %s' % (self.full_username, self.server)
@@ -113,28 +119,41 @@ class OvpnClient(object):
         return "<OvpnClient(common_name=%s, server=%s, ...)>" % (
                 self.full_username, self.server)
 
-    def track_lease(self):
-        """Start keeping track of the DHCP lease time and make sure the lease
-        is refreshed early enough.
-        """
-        if self._leased_ip_address is None or self._rebinding_timeout is None:
-            self.log.error('attempted to track lease for client "%s", but no ' \
-                    'lease available.', self)
+    @property
+    def state(self):
+        return self._state
+
+    def _expected_state(self, expected_state, func_name):
+        if self._state != expected_state:
+            self.log.debug('calling %s in invalid state %d ' \
+                    'instead of state %d', func_name, self._state,
+                    expected_state)
+            return False
+        else:
+            return True
+
+    def set_lease(self, leased_ip_address, rebinding_timeout, lease_timeout):
+        if not self._expected_state(self.STATE_AWAITING_LEASE, 'set_lease'):
             return
+        self._leased_ip_address = leased_ip_address
+        self._rebinding_timeout = rebinding_timeout
+        self._lease_timeout = lease_timeout
+        self._state = self.STATE_WITH_LEASE
+
         self._timeout_mgr.add_timeout_object(self)
 
     def kill(self):
         """Disable the client.  Although any pending activities will continue,
         no new activities will be started.
         """
-        self._killed = True
+        self._state = self.STATE_DISCONNECTED
 
     @property
     def iszombie(self):
         """Has this client instance been killed?
         @return: Returns True if the instance has been killed, otherwise False.
         """
-        return self._killed
+        return self._state == self.STATE_DISCONNECTED
 
     @property
     def timeout_time(self):
@@ -149,15 +168,22 @@ class OvpnClient(object):
         """
         if self.iszombie:
             return
+        self.refresh_lease()
+
+    def refresh_lease(self):
+        if not self._expected_state(self.STATE_WITH_LEASE, 'refresh_lease'):
+            return
 
         if self._lease_timeout is not None and \
                 self._lease_timeout <= time.time():
             self.log.warning('Rebinding timeout for %s called too late - ' \
                     'lease has already expired on %d.  Disconnecting client.',
                     self, self._lease_timeout)
+            self.kill()
             self.server.disconnect_client(self.full_username)
             return
 
+        self._state = self.STATE_REFRESHING_LEASE
         try:
             self._refresh_lease(
                     success_handler_clb=self._handle_lease_refresh_succeeded,
@@ -171,6 +197,7 @@ class OvpnClient(object):
                     lease_time=self._realm_data.expected_dhcp_lease_time)
         except:
             self.log.exception('Adding a new DHCP refresh request failed')
+            self.kill()
             self.server.disconnect_client(self.full_username)
 
     def _handle_lease_refresh_succeeded(self, res):
@@ -179,13 +206,16 @@ class OvpnClient(object):
         again in time.
         @param res: Dictionary containing all data returned by the DHCP request.
         """
-        if self.iszombie:
+        if not self._expected_state(self.STATE_REFRESHING_LEASE,
+                '_handle_lease_refresh_succeeded'):
             return
 
         self.log.debug('DHCP refresh request succeeded: %s', repr(res))
-        self._leased_ip_address = res['ip_address']
+
         self._rebinding_timeout = res['rebinding_timeout']
         self._lease_timeout = res['lease_timeout']
+        self._state = self.STATE_WITH_LEASE
+
         self._timeout_mgr.add_timeout_object(self)
 
     def _handle_lease_refresh_failed(self):
@@ -193,9 +223,12 @@ class OvpnClient(object):
         failed or has timed out.  Takes care of disconnecting the client, as
         the lease has obviously no chance of remaining established.
         """
-        if self.iszombie:
+        if not self._expected_state(self.STATE_REFRESHING_LEASE,
+                '_handle_lease_refresh_failed'):
             return
 
+
+        self.kill()
         self.server.disconnect_client(self.full_username)
 
 
