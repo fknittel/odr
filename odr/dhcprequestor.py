@@ -276,12 +276,18 @@ class DhcpAddressRequest(object):
                             gateway))
             del static_routes
 
-        # Calucate lease timeouts
+        # Calculate lease timeouts (with RFC T1/T2 if not found in packet)
         lease_delta = ipv4(packet.GetOption('ip_address_lease_time')).int()
         result['lease_timeout'] = self._start_time + lease_delta
-        renewal_delta = ipv4(packet.GetOption('renewal_time_value')).int()
+        if packet.IsOption('renewal_time_value'):
+            renewal_delta = ipv4(packet.GetOption('renewal_time_value')).int()
+        else:
+            renewal_delta = int(lease_delta * 0.5) + random.randint(-5, 5)
         result['renewal_timeout'] = self._start_time + renewal_delta
-        rebinding_delta = ipv4(packet.GetOption('rebinding_time_value')).int()
+        if packet.IsOption('rebinding_time_value'):
+            rebinding_delta = ipv4(packet.GetOption('rebinding_time_value')).int()
+        else:
+            rebinding_delta = int(lease_delta * 0.875) + random.randint(-5, 5)
         result['rebinding_timeout'] = self._start_time + rebinding_delta
 
         self._success_handler(result)
