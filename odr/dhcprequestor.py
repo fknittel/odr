@@ -86,7 +86,7 @@ class DhcpAddressRequest(object):
         self._initial_timeout = kwargs.get("timeout", 4)
         self._lease_time = kwargs.get("lease_time", None)
 
-        self._start_time = time.time()
+        self._start_time = int(time.time())
 
         self._xid = ipv4([random.randint(0, 255) for i in range(4)])
 
