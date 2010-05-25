@@ -436,7 +436,7 @@ class OvpnCmdConn(CommandConnection):
         self.log = logging.getLogger('ovpncmdconn')
 
     def __del__(self):
-        self.log.debug('destructing OvnCmdConn')
+        self.log.debug('destructing OvpnCmdConn')
         if self._ret_f is not None:
             if not self._wrote_ret:
                 self._write_ret(ovpn.CC_RET_FAILED)
