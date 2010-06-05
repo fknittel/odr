@@ -39,6 +39,7 @@ from odr.cmdconnection import CommandConnection, CommandConnectionListener
 from odr.timeoutmgr import TimeoutManager
 from odr.socketloop import SocketLoop
 import odr.dhcprequestor
+import odr.listeningsocket
 from odr.weakmethod import WeakBoundMethod
 from odr.route import network_mask
 
@@ -941,7 +942,7 @@ def load_requestors(sloop, requestor_mgr, realms_data):
                     listen_device=realm_data.dhcp_listening_device)
             sloop.add_socket_handler(requestor)
             requestor_mgr.add_requestor(requestor)
-    except odr.dhcprequestor.DhcpLocalAddressBindFailed, ex:
+    except odr.listeningsocket.SocketLocalAddressBindFailed, ex:
         logging.error('Could not bind to DHCP listening address %s:%d@%s',
                 ex.args[0], ex.args[1], ex.args[2])
         return False

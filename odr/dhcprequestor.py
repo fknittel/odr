@@ -20,10 +20,8 @@
 import random
 import time
 import logging
-import socket
-import IN
-import errno
 from odr.route import network_mask
+from odr.listeningsocket import ListeningSocket
 
 from pydhcplib.dhcp_packet import DhcpPacket
 from pydhcplib.type_ipv4 import ipv4
@@ -409,17 +407,7 @@ class DhcpAddressRefreshRequest(DhcpAddressRequest):
         return packet
 
 
-class DhcpLocalAddressBindFailed(Exception):
-    """For some reason, the requested local address / port combination could not
-    be bound to.
-    """
-
-class DhcpLocalAddressNotAvailable(DhcpLocalAddressBindFailed):
-    """The requested local address / port combination was not available.
-    """
-
-
-class DhcpAddressRequestor(object):
+class DhcpAddressRequestor(ListeningSocket):
     """A DhcpAddressRequestor instance represents a UDP socket listening for
     DHCP responses on a specific IP address and port on a specific network
     device.
@@ -428,10 +416,11 @@ class DhcpAddressRequestor(object):
     to send DHCP requests.  The requestor maps DHCP responses back to a specific
     request via the request's XID.
 
-    Provides attribute listen_device, listen_address and add_request method for
-    use by the requestor manager.
+    Provides attribute listen_device, listen_address (through its super-class
+    ListeningSocket) and add_request method for use by the requestor manager.
 
-    Provides socket and handle_socket for use by the socket loop.
+    Provides socket (through its super-class ListeningSocket) and handle_socket
+    for use by the socket loop.
     """
 
     # Maps dhcp_message_type to a request's message type handler.
@@ -447,31 +436,11 @@ class DhcpAddressRequestor(object):
         :ivar listen_port: Local DHCP listening port. Defaults to 67.
         :ivar listen_device: Device name to bind to.
         """
-        self.listen_address = listen_address
-        self.listen_device = listen_device
-        self.listen_port = listen_port
-
         self.log = logging.getLogger('dhcpaddrrequestor')
         self._requests = {}
 
-        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        if self.listen_device is not None:
-            self._socket.setsockopt(socket.SOL_SOCKET, IN.SO_BINDTODEVICE,
-                    self.listen_device + '\0')
-
-        try :
-            self._socket.bind((self.listen_address, self.listen_port))
-        except socket.error, msg:
-            err = msg.args[0]
-            if err == errno.EADDRNOTAVAIL:
-                raise DhcpLocalAddressNotAvailable(
-                        self.listen_address, self.listen_port,
-                        self.listen_device)
-            else:
-                raise DhcpLocalAddressBindFailed(
-                        self.listen_address, self.listen_port,
-                        self.listen_device, msg)
+        super(DhcpAddressRequestor, self).__init__(listen_address,
+                listen_port, listen_device)
 
         self.log.debug('listening on %s:%d@%s for DHCP responses' % (
                 self.listen_address, self.listen_port, self.listen_device))
@@ -491,13 +460,6 @@ class DhcpAddressRequestor(object):
         """
         self.log.debug("deleting xid %d" % request.xid)
         del self._requests[request.xid]
-
-
-    @property
-    def socket(self):
-        """@return: Returns the listening socket.
-        """
-        return self._socket
 
     def handle_socket(self):
         """Retrieves the next, waiting DHCP packet, parses it and calls the
@@ -541,7 +503,7 @@ class DhcpAddressRequestor(object):
 
     def send_packet(self, packet, dest_ip, dest_port):
         data = packet.EncodePacket()
-        self._socket.sendto(data, (dest_ip, dest_port))
+        self.socket.sendto(data, (dest_ip, dest_port))
 
 
 class DhcpAddressRequestorManager(object):
