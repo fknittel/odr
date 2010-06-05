@@ -14,7 +14,7 @@ Contents:
    :maxdepth: 2
 
    api/dhcprequestor.rst
-
+   TODO.rst
 
 Indices and tables
 ==================
