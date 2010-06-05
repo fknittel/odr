@@ -54,25 +54,25 @@ class DhcpAddressRequest(object):
         Creates a new XID.  Each address request has such a unique (randomly
         chosen) identifier.
 
-        @param requestor: Instance of the requestor, where the request is
+        :ivar requestor: Instance of the requestor, where the request is
                 tracked and where the listening socket is maintained.
-        @param timeout_mgr: Instance of the timeout manager.
-        @param success_handler_clb: Call-back that is called as soon as the
+        :ivar timeout_mgr: Instance of the timeout manager.
+        :ivar success_handler_clb: Call-back that is called as soon as the
                 request has succeeded.
-        @param failure_handler_clb: Call-back that is called as soon as the
+        :ivar failure_handler_clb: Call-back that is called as soon as the
                 request has failed or timed out.
-        @param local_ip: IP address from which all DHCP requests originate and
+        :ivar local_ip: IP address from which all DHCP requests originate and
                 on which the responses are received.  Is used within the DHCP
                 packets.
-        @param client_identifier: The client identifier which will represent the
+        :ivar client_identifier: The client identifier which will represent the
                 client for which an IP address is requested.
-        @param server_ips: A list of IP addresses to which the DHCP requests
+        :ivar server_ips: A list of IP addresses to which the DHCP requests
                 should be sent.
-        @param max_retries: The maximum number of retries after timeouts.
+        :ivar max_retries: The maximum number of retries after timeouts.
                 Defaults to 2 retries.
-        @param timeout: Number of seconds to wait for a DHCP response before
+        :ivar timeout: Number of seconds to wait for a DHCP response before
                 timing out and/or retrying the request.  Defaults to 5 seconds.
-        @param lease_time: DHCP lease time we would like to have. Defaults to
+        :ivar lease_time: DHCP lease time we would like to have. Defaults to
                 None, meaning no specific lease time is requested.
         """
         self._requestor = kwargs["requestor"]
@@ -108,7 +108,7 @@ class DhcpAddressRequest(object):
 
     @property
     def xid(self):
-        """@return: Returns the unique identifier of the DHCP request.
+        """:returns: the unique identifier of the DHCP request.
         """
         return self._xid.int()
 
@@ -313,9 +313,9 @@ class DhcpAddressRequest(object):
 
     @property
     def timeout_time(self):
-        """\
-        @return: Point in time (in seconds since the UNIX epoch) of the
-                timeout of the last packet that was sent.
+        """
+        :returns: Point in time (in seconds since the UNIX epoch) of the
+                  timeout of the last packet that was sent.
         """
         return self._timeout_time
 
@@ -345,7 +345,7 @@ class DhcpAddressInitialRequest(DhcpAddressRequest):
     def __init__(self, **kwargs):
         """Sets up the initial address request.
 
-        See DhcpAddressRequest.__init__ for further parameters.
+        See :meth:`DhcpAddressRequest.__init__` for further parameters.
         """
         DhcpAddressRequest.__init__(self, **kwargs)
 
@@ -385,7 +385,7 @@ class DhcpAddressRefreshRequest(DhcpAddressRequest):
     def __init__(self, **kwargs):
         """Sets up the address request.
 
-        See DhcpAddressRequest.__init__ for further parameters.
+        See :meth:`DhcpAddressRequest.__init__` for further parameters.
         """
         DhcpAddressRequest.__init__(self, **kwargs)
 
@@ -443,9 +443,9 @@ class DhcpAddressRequestor(object):
 
     def __init__(self, listen_address='', listen_port=67, listen_device=None):
         """\
-        @param listen_address: IP address as string to listen on.
-        @param listen_port: Local DHCP listening port. Defaults to 67.
-        @param listen_device: Device name to bind to.
+        :ivar listen_address: IP address as string to listen on.
+        :ivar listen_port: Local DHCP listening port. Defaults to 67.
+        :ivar listen_device: Device name to bind to.
         """
         self.listen_address = listen_address
         self.listen_device = listen_device
@@ -479,7 +479,7 @@ class DhcpAddressRequestor(object):
     def add_request(self, request):
         """Adds a new DHCP address request to this requestor.
 
-        @param request: The request that should be added.
+        :ivar request: The request that should be added.
         """
         self.log.debug("adding xid %d" % request.xid)
         self._requests[request.xid] = request
@@ -487,7 +487,7 @@ class DhcpAddressRequestor(object):
     def del_request(self, request):
         """Removes a DHCP address request that was previously added.
 
-        @param request: The request that should be removed.
+        :ivar request: The request that should be removed.
         """
         self.log.debug("deleting xid %d" % request.xid)
         del self._requests[request.xid]
@@ -550,7 +550,8 @@ class DhcpAddressRequestorManager(object):
         self.log = logging.getLogger('dhcpaddrrequestormgr')
 
     def add_requestor(self, requestor):
-        """@param requestor: Instance of a requestor that should be added to
+        """
+        :ivar requestor: Instance of a requestor that should be added to
                 the list of known requestors.
         """
         listen_pair = (requestor.listen_device, requestor.listen_address)
@@ -561,14 +562,14 @@ class DhcpAddressRequestorManager(object):
         self._requestors_by_device_and_ip[listen_pair] = requestor
 
     def has_requestor(self, device, local_ip):
-        """@return: Returns True if the device and local_ip already has a
-        requestor.
+        """:returns: True if the device and local_ip already has a requestor.
         """
         return (device, local_ip) in self._requestors_by_device_and_ip
 
     def get_requestor(self, device, local_ip):
-        """@return: Returns the requestor matching the device and local_ip, or
-        None in case there is none.
+        """
+        :returns: the requestor matching the device and local_ip, or
+                  None in case there is none.
         """
         listen_pair = (device, local_ip)
         if listen_pair not in self._requestors_by_device_and_ip:
@@ -582,7 +583,7 @@ def parse_classless_static_routes(data):
     """Parses an array of ints, representing classless static routes according
     to RFC 3442, into a list of tuples with full IP addresses.
 
-    @return: Returns a tuple consisting of network, netmask and router.
+    :returns: a tuple consisting of network, netmask and router.
     """
     routes = []
     remaining = data[:]
