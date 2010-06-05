@@ -28,8 +28,8 @@ import fdsend
 
 def unpack_cmd(cmd_line):
     """Parse the command line and return the parsed data or None.
-    @param cmd_line: Single-line command.
-    @return: Returns a tuple of command name and parameter dictionary.
+    :ivar cmd_line: Single-line command.
+    :returns: a tuple of command name and parameter dictionary.
     """
     try:
         params = {}
@@ -44,9 +44,9 @@ def unpack_cmd(cmd_line):
 
 def pack_cmd(cmd, params):
     """Packs a command name and a dictionary of parameters into a command line.
-    @param cmd: The command name.
-    @param params: A dictionary of parameters.
-    @return: Returns the command line.
+    :ivar cmd: The command name.
+    :ivar params: A dictionary of parameters.
+    :returns: the command line.
     """
     for e in [cmd] + params.keys() + params.values():
         if ('\n' in e) or ('\0' in e):
@@ -67,8 +67,8 @@ class CommandConnection(object):
 
     def __init__(self, sloop, sock, **kwargs):
         """\
-        @param sloop: Instance of the socket loop.
-        @param sock: Socket that will be used for communication.
+        :ivar sloop: Instance of the socket loop.
+        :ivar sock: Socket that will be used for communication.
         """
         super(CommandConnection, self).__init__(sloop=sloop, sock=sock,
                 **kwargs)
@@ -82,14 +82,14 @@ class CommandConnection(object):
 
     @property
     def socket(self):
-        """@return: Returns the underlying socket.
+        """:returns: the underlying socket.
         """
         return self._socket
 
     def _parse_command(self, cmd_line, files):
         """Splits the command-line and hands off the parsed data to the
         child class' handle_cmd method.
-        @param cmd_line: The command line string to parse.
+        :ivar cmd_line: The command line string to parse.
         """
         self.log.debug('parsing command "%s"' % repr(cmd_line))
         cmd, params = unpack_cmd(cmd_line)
@@ -124,11 +124,11 @@ class CommandConnection(object):
         """Used to send responses back to the client.  Sends the specified
         command as a single message.
 
-        @param cmd: Command to send. Should not contain a new-line or a zero
+        :ivar cmd: Command to send. Should not contain a new-line or a zero
                 character.
-        @param params: Parameters to send. Should not contain a new-line or a
+        :ivar params: Parameters to send. Should not contain a new-line or a
                 zero character.  (Optional.)
-        @param files: File handles to send.  (Optional.)
+        :ivar files: File handles to send.  (Optional.)
         """
         fdsend.sendfds(self._socket, pack_cmd(cmd, params), fds=files)
 
@@ -153,11 +153,11 @@ class CommandConnectionListener(object):
         is deleted first.  The file permissions are set according to the
         socket_perm_mode parameter.
 
-        @param sloop: Instance of the socket loop.
-        @param cmd_conn_factory: Factory method that gets called with the
+        :ivar sloop: Instance of the socket loop.
+        :ivar cmd_conn_factory: Factory method that gets called with the
                 socket loop instance and the new socket for each new connection.
-        @param socket_path: Path to the POSIX Local IPC Socket.
-        @param socket_perm_mode: File access permissions to be set for the
+        :ivar socket_path: Path to the POSIX Local IPC Socket.
+        :ivar socket_perm_mode: File access permissions to be set for the
                 file socket.
         """
         self._sloop = sloop
@@ -180,7 +180,7 @@ class CommandConnectionListener(object):
 
     @property
     def socket(self):
-        """@return: Returns the listening socket.
+        """:returns: the listening socket.
         """
         return self._socket
 
@@ -212,8 +212,8 @@ def getsockpeercred(sock):
     """Retrieves the credentials of a peer which is connected via a AF_UNIX
     socket.
 
-    @param sock: The socket connection.
-    @return: Returns a triple with the peer's PID, UID and GID.
+    :ivar sock: The socket connection.
+    :returns: a triple with the peer's PID, UID and GID.
     """
     # SO_PEERCRED returns a struct ucred.  The three struct members pid_t, uid_t
     # and gid_t are defined as "int" on Linux systems, so this should be

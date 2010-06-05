@@ -56,6 +56,7 @@ Per-module :mod:`odr` API documentation.
    :maxdepth: 2
 
    api/dhcprequestor.rst
+   api/cmdconnection.rst
    TODO.rst
 
 Indices and tables
