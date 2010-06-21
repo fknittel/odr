@@ -503,38 +503,41 @@ class DhcpAddressRequestor(object):
         """Retrieves the next, waiting DHCP packet, parses it and calls the
         handler of the associated request.
         """
-        data, source_address = self._socket.recvfrom(2048)
-        if len(data) == 0:
-            self.log.warning("unexpectedly received EOF!")
-            return
-        packet = DhcpPacket()
-        packet.source_address = source_address
-        packet.DecodePacket(data)
+        try:
+            data, source_address = self._socket.recvfrom(2048)
+            if len(data) == 0:
+                self.log.warning("unexpectedly received EOF!")
+                return
+            packet = DhcpPacket()
+            packet.source_address = source_address
+            packet.DecodePacket(data)
 
-        if (not packet.IsDhcpPacket()) or \
-                (not packet.IsOption("dhcp_message_type")):
-            self.log.debug("Ignoring invalid packet")
-            return
+            if (not packet.IsDhcpPacket()) or \
+                    (not packet.IsOption("dhcp_message_type")):
+                self.log.debug("Ignoring invalid packet")
+                return
 
-        dhcp_type = packet.GetOption("dhcp_message_type")[0]
-        if dhcp_type not in self._DHCP_TYPE_HANDLERS:
-            self.log.debug("Ignoring packet of unexpected DHCP type %d" % \
-                    dhcp_type)
-            return
-                        
-        xid = ipv4(packet.GetOption('xid'))
-        if xid.int() not in self._requests:
-            self.log.debug("Ignoring answer with xid %s" % repr(xid.int()))
-            return
+            dhcp_type = packet.GetOption("dhcp_message_type")[0]
+            if dhcp_type not in self._DHCP_TYPE_HANDLERS:
+                self.log.debug("Ignoring packet of unexpected DHCP type %d" % \
+                        dhcp_type)
+                return
 
-        request = self._requests[xid.int()]
-        clb_name = self._DHCP_TYPE_HANDLERS[dhcp_type]
-        if not hasattr(request, clb_name):
-            self.log.error("request has no callback '%s'" % clb_name)
-            return
+            xid = ipv4(packet.GetOption('xid'))
+            if xid.int() not in self._requests:
+                self.log.debug("Ignoring answer with xid %s" % repr(xid.int()))
+                return
 
-        clb = getattr(request, clb_name)
-        clb(packet)
+            request = self._requests[xid.int()]
+            clb_name = self._DHCP_TYPE_HANDLERS[dhcp_type]
+            if not hasattr(request, clb_name):
+                self.log.error("request has no callback '%s'" % clb_name)
+                return
+
+            clb = getattr(request, clb_name)
+            clb(packet)
+        except:
+            self.log.exception('handling DHCP packet failed')
 
     def send_packet(self, packet, dest_ip, dest_port):
         data = packet.EncodePacket()
