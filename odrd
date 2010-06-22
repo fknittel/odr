@@ -113,7 +113,16 @@ class OvpnClient(object):
         return "<OvpnClient(common_name=%s, server=%s, ...)>" % (
                 self.full_username, self.server)
 
-    def track_lease(self):
+    def handle_connect(self):
+        self._track_lease()
+        # send acct start
+        # register acct update
+
+    def handle_disconnect(self):
+        self._kill()
+        # send acct stop
+
+    def _track_lease(self):
         """Start keeping track of the DHCP lease time and make sure the lease
         is refreshed early enough.
         """
@@ -123,7 +132,7 @@ class OvpnClient(object):
             return
         self._timeout_mgr.add_timeout_object(self)
 
-    def kill(self):
+    def _kill(self):
         """Disable the client.  Although any pending activities will continue,
         no new activities will be started.
         """
@@ -246,7 +255,7 @@ class OvpnClientManager(object):
         """
         client = OvpnClient(timeout_mgr=self._timeout_mgr,
                 refresh_lease_clb=self._refresh_lease, **kwargs)
-        client.track_lease()
+        client.handle_connect()
         self._add_client(client)
         return client
 
@@ -337,7 +346,7 @@ class OvpnClientManager(object):
         some time.
         @param client: The client instance to kill and forget.
         """
-        client.kill()
+        client.handle_disconnect()
         del self._clients_by_username[client.full_username]
         del self._clients_by_server[client.server][client.full_username]
 
