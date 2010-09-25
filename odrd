@@ -487,7 +487,7 @@ class OvpnCmdConn(CommandConnection):
         if self._realm_data.default_gateway is not None:
             self._config_f.write('push "route-gateway %s"\n' % (
                 self._realm_data.default_gateway))
-        else if 'gateway' in res:
+        elif 'gateway' in res:
             self._config_f.write('push "route-gateway %s"\n' % (
                 res['gateway']))
         else:
