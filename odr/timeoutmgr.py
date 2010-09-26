@@ -43,10 +43,12 @@ class TimeoutManager(object):
         self._timeout_objects = []
 
     def add_rel_timeout(self, timeout_secs, timeout_func):
-        """Adds a timeout event for a specific time.  On timeout, the function
+        """Adds a timeout event for a time in the near future, measured in
+        seconds from the current point of time.  On timeout, the function
         timeout_func is called.
 
-        @param timeout_secs: Absolute time at which the timeout shall occur.
+        @param timeout_secs: Relative time in seconds from now at which the
+                timeout shall occur.
         @param timeout_func: Function that will be called on timeout.
         @return: Returns a timeout object that can be used to remove the
                 timeout event before the actual timeout.
@@ -57,7 +59,8 @@ class TimeoutManager(object):
         """Adds a timeout event for a specific time.  On timeout, the function
         timeout_func is called.
 
-        @param timeout_time: Absolute time at which the timeout shall occur.
+        @param timeout_time: Absolute time (in seconds since the epoch) at
+                which the timeout shall occur.
         @param timeout_func: Function that will be called on timeout.
         @return: Returns a timeout object that can be used to remove the
                 timeout event before the actual timeout.
