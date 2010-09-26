@@ -94,7 +94,8 @@ class OvpnClient(object):
 
     def __init__(self, timeout_mgr, refresh_lease_clb, full_username,
                 server, realm_data, leased_ip_address=None,
-                rebinding_timeout=None, lease_timeout=None):
+                rebinding_timeout=None, lease_timeout=None,
+                radius_client=None):
         self._timeout_mgr = timeout_mgr
         self._refresh_lease = refresh_lease_clb
         self.full_username = full_username
@@ -103,6 +104,10 @@ class OvpnClient(object):
         self._leased_ip_address = leased_ip_address
         self._rebinding_timeout = rebinding_timeout
         self._lease_timeout = lease_timeout
+
+        self._listeners = []
+        if radius_client is not None:
+            self._listeners.append(radius_client)
 
         self.log = logging.getLogger('ovpnclient')
         self._killed = False
@@ -114,7 +119,21 @@ class OvpnClient(object):
         return "<OvpnClient(common_name=%s, server=%s, ...)>" % (
                 self.full_username, self.server)
 
-    def track_lease(self):
+    def handle_connect(self):
+        self._track_lease()
+        for listener in self._listeners:
+            listener.handle_connect(self)
+
+    def handle_refresh(self):
+        for listener in self._listeners:
+            listener.handle_refresh(self)
+
+    def handle_disconnect(self):
+        self._kill()
+        for listener in self._listeners:
+            listener.handle_disconnect(self)
+
+    def _track_lease(self):
         """Start keeping track of the DHCP lease time and make sure the lease
         is refreshed early enough.
         """
@@ -124,7 +143,7 @@ class OvpnClient(object):
             return
         self._timeout_mgr.add_timeout_object(self)
 
-    def kill(self):
+    def _kill(self):
         """Disable the client.  Although any pending activities will continue,
         no new activities will be started.
         """
@@ -144,6 +163,10 @@ class OvpnClient(object):
         @return: Returns rebinding timeout in seconds.
         """
         return self._rebinding_timeout
+
+    @property
+    def realm_data(self):
+        return self._realm_data
 
     def handle_timeout(self):
         """Called as soon as the rebinding timeout occurs.
@@ -188,6 +211,7 @@ class OvpnClient(object):
         self._rebinding_timeout = res['rebinding_timeout']
         self._lease_timeout = res['lease_timeout']
         self._timeout_mgr.add_timeout_object(self)
+        self.handle_refresh()
 
     def _handle_lease_refresh_failed(self):
         """Called as soon as the DHCP refresh request has completed and
@@ -247,7 +271,7 @@ class OvpnClientManager(object):
         """
         client = OvpnClient(timeout_mgr=self._timeout_mgr,
                 refresh_lease_clb=self._refresh_lease, **kwargs)
-        client.track_lease()
+        client.handle_connect()
         self._add_client(client)
         return client
 
@@ -338,7 +362,7 @@ class OvpnClientManager(object):
         some time.
         @param client: The client instance to kill and forget.
         """
-        client.kill()
+        client.handle_disconnect()
         del self._clients_by_username[client.full_username]
         del self._clients_by_server[client.server][client.full_username]
 
@@ -686,6 +710,19 @@ def cfg_iterate(cfg, section_type):
         elem_name = sect_name[len(sec_start):]
         yield (sect_name, elem_name)
 
+def cfg_section_present(cfg, section_type):
+    """Indicates if a section name prefix as used by cfg_iterate is present
+    in the configuration file or not.
+    @param cfg: Config object to read the sections from.
+    @param section_type: Section type name that acts as the prefix for all
+        relevant section names.
+    """
+    try:
+        first = cfg_iterate(cfg, section_type).next()
+    except StopIteration:
+        return False
+    return True
+
 def user_to_uid(user):
     """Transforms a user to a UID.  In case the user is already a UID, the
     UID is passed through unchanged.
@@ -769,6 +806,7 @@ class RealmData(object):
             self.static_routes = parent.static_routes
             self.dhcp_server_ips = parent.dhcp_server_ips
             self.expected_dhcp_lease_time = parent.expected_dhcp_lease_time
+            self.radius_accounting = parent.radius_accounting
         else:
             self.vid = None
             self.dhcp_local_port = 67
@@ -779,6 +817,7 @@ class RealmData(object):
             self.static_routes = None
             self.dhcp_server_ips = None
             self.expected_dhcp_lease_time = None
+            self.radius_accounting = None
 
 
 def process_realm(cfg, realm_name, realms, delayed_realms):
@@ -839,6 +878,9 @@ def process_realm(cfg, realm_name, realms, delayed_realms):
     realm_data.expected_dhcp_lease_time = \
             cfg_getint_def(cfg, sect, 'expected_dhcp_lease_time',
                     realm_data.expected_dhcp_lease_time)
+
+    realm_data.radius_accounting = cfg_get_def(cfg, sect, 'radius_accounting',
+            realm_data.radius_accounting)
 
 
 def read_realms(cfg):
@@ -908,7 +950,7 @@ def drop_caps(user=None, group=None, caps=None):
     prctl.cap_inheritable.limit()
 
 
-def read_servers(cfg, sloop):
+def read_ovpn_servers(cfg, sloop):
     """Read all servers from the configuration file and connect to each of
     them.
     """
@@ -918,6 +960,19 @@ def read_servers(cfg, sloop):
                 socket_fn=cfg.get(sect, 'mgmt_socket'))
         servers[server_name] = server
     return servers
+
+
+def read_radius_servers(cfg, client):
+    """Read all RADIUS servers from the configuration file and create
+    listening sockets for them."""
+    for sect, server_name in cfg_iterate(cfg, 'radius-server'):
+        options = dict()
+        # We only support IPv4 in the RADIUS support code anyway, thus the
+        # use of gethostbyname is appropriate.
+        options['server_ips'] = [socket.gethostbyname(i.strip()) \
+            for i in cfg.get(sect, 'server_ips').split(',')]
+        options['server_secret'] = cfg.get(sect, 'server_secret')
+        client.add_server(server_name, options)
 
 
 def load_requestors(sloop, requestor_mgr, realms_data):
@@ -1012,9 +1067,15 @@ def main():
     timeout_mgr = TimeoutManager()
     sloop.add_idle_handler(timeout_mgr)
 
+    # Initialize the optional RadiusClient.
+    radius_client = None
+    if cfg_section_present(cfg, 'radius-server'):
+        radius_client = RadiusClient(timeout_mgr, sloop)
+        read_radius_servers(cfg, radius_client)
+
     requestor_mgr = odr.dhcprequestor.DhcpAddressRequestorManager()
 
-    servers = read_servers(cfg, sloop)
+    servers = read_ovpn_servers(cfg, sloop)
 
     for server in servers.values():
         ovpn.OvpnServerSupervisor(timeout_mgr=weakref.proxy(timeout_mgr),
@@ -1095,3 +1156,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
