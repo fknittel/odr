@@ -469,7 +469,7 @@ class OvpnCmdConn(CommandConnection):
             self._write_ret(ovpn.CC_RET_FAILED)
             return
 
-        if 'rebinding_timeout' not in res or 'lease_timeout' in res:
+        if 'rebinding_timeout' not in res or 'lease_timeout' not in res:
             self.log.error('DHCP request without lease indication: %s' % (
                     repr(res)))
             self._write_ret(ovpn.CC_RET_FAILED)
