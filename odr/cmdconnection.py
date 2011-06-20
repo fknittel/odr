@@ -70,8 +70,7 @@ class CommandConnection(object):
         :ivar sloop: Instance of the socket loop.
         :ivar sock: Socket that will be used for communication.
         """
-        super(CommandConnection, self).__init__(sloop=sloop, sock=sock,
-                **kwargs)
+        super(CommandConnection, self).__init__()
         self._sloop = sloop
         self._socket = sock
         self._sloop.add_socket_handler(self)
