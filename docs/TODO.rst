@@ -1,6 +1,15 @@
 Planned features / unsolved issues / wishlist items
 ===================================================
 
+* On odrd start: Disconnect all OpenVPN clients that are without
+  virtual_address. They were probably in the process of negotiating an address
+  via odrd before odrd's restart.
+
+* Do not disconnect clients for which the DHCP refresh does not work at rebind
+  time.  Retry a few times before the lease time out and only disconnect if
+  all fails and the timeout is reached / would be reached.  (This is important
+  to avoid disconnecting clients due to intermittant DHCP server failures.)
+
 * Improve logging:
   + Info messages concerning connects and full_username, IP-address and VLAN-ID.
   + Info messages concerning refreshs and disconnects.
