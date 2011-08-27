@@ -1,4 +1,4 @@
-# vim:set encoding=utf-8 ft=python ts=8 sw=4 sts=4 et cindent:
+# vim:set fileencoding=utf-8 ft=python ts=8 sw=4 sts=4 et cindent:
 
 # queue.py
 #
