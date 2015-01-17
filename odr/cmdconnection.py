@@ -21,7 +21,7 @@
 import logging
 import socket
 import os
-import IN
+from odr.socketcompat import SO_PEERCRED
 import struct
 import fdsend
 
@@ -218,4 +218,4 @@ def getsockpeercred(sock):
     # and gid_t are defined as "int" on Linux systems, so this should be
     # portable across Linux architectures.
     return struct.unpack('3i', sock.getsockopt(socket.SOL_SOCKET,
-            IN.SO_PEERCRED, struct.calcsize('3i')))
+            SO_PEERCRED, struct.calcsize('3i')))
