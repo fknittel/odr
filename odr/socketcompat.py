@@ -21,18 +21,22 @@ from __future__ import (absolute_import, division,
         print_function, unicode_literals)
 
 try:
+    # pylint: disable=no-name-in-module
     from socket import SO_BINDTODEVICE
 except ImportError:
     try:
+        # pylint: disable=no-name-in-module
         from IN import SO_BINDTODEVICE
     except ImportError:
         # Fall back to /usr/include/asm-generic/socket.h from the Linux kernel
         SO_BINDTODEVICE = 25
 
 try:
+    # pylint: disable=no-name-in-module
     from socket import SO_PEERCRED
 except ImportError:
     try:
+        # pylint: disable=no-name-in-module
         from IN import SO_PEERCRED
     except ImportError:
         # Fall back to /usr/include/asm-generic/socket.h from the Linux kernel

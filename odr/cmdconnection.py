@@ -65,18 +65,18 @@ class CommandConnection(object):
     MAX_NUM_FDS = 8
     MAX_MSG_SIZE = 1024
 
-    def __init__(self, sloop, sock, **kwargs):
+    def __init__(self, sloop, sock, log, **kwargs):
         """\
         :ivar sloop: Instance of the socket loop.
         :ivar sock: Socket that will be used for communication.
         """
-        super(CommandConnection, self).__init__()
         self._sloop = sloop
         self._socket = sock
+        self._log = log
         self._sloop.add_socket_handler(self)
 
     def __del__(self):
-        self.log.debug('destructing CommandConnection')
+        self._log.debug('destructing CommandConnection')
         self._socket.close()
 
     @property
@@ -90,10 +90,10 @@ class CommandConnection(object):
         child class' handle_cmd method.
         :ivar cmd_line: The command line string to parse.
         """
-        self.log.debug('parsing command "%s"' % repr(cmd_line))
+        self._log.debug('parsing command "%s"' % repr(cmd_line))
         cmd, params = unpack_cmd(cmd_line)
         if cmd is None:
-            self.log.warning('failed to parse command "%s"' % repr(cmd_line))
+            self._log.warning('failed to parse command "%s"' % repr(cmd_line))
             return
         self.handle_cmd(cmd, params, files)
 
@@ -116,7 +116,7 @@ class CommandConnection(object):
         if cmd_line != '':
             self._parse_command(cmd_line, files=files)
         else:
-            self.log.debug('closing cmd socket due to EOF')
+            self._log.debug('closing cmd socket due to EOF')
             self._sloop.del_socket_handler(self)
 
     def send_cmd(self, cmd, params={}, files=None):
@@ -136,6 +136,16 @@ class CommandConnection(object):
         received and parsed by CommandConnection.  A sub-class should implement
         the stub function and do the actual command processing.
         """
+
+    def handle_cmd(self, cmd, params, files):
+        """Called for each command received over the command socket.  Forwards
+        the command processing according to the command's name.
+
+        @param cmd: Name of the command.
+        @param params: Dictionary of the command's parameters.
+        @param files: Array of file pointers passed through with the command.
+        """
+        raise NotImplementedError('Method handle_cmd not implemented')
 
 
 class CommandConnectionListener(object):
@@ -164,12 +174,12 @@ class CommandConnectionListener(object):
         self._factory = cmd_conn_factory
         self._auth_check = auth_check
 
-        self.log = logging.getLogger('cmdconnlistener')
+        self._log = logging.getLogger('cmdconnlistener')
         self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._socket.setblocking(False)
         if os.path.exists(self._socket_path):
             os.remove(self._socket_path)
-        self.log.debug('listening on socket %s' % self._socket_path)
+        self._log.debug('listening on socket %s' % self._socket_path)
         self._socket.bind(self._socket_path)
         os.chmod(self._socket_path, socket_perm_mode)
         self._socket.listen(self.ACCEPT_QUEUE_LEN)
@@ -194,12 +204,12 @@ class CommandConnectionListener(object):
         except IOError, e:
             print "Received exception %s while accepting new cmd conn" % repr(e)
             return
-        self.log.debug('received a new connection')
+        self._log.debug('received a new connection')
         sock.setblocking(False)
         if self._auth_check is not None:
             pid, uid, gid = getsockpeercred(sock)
             if not self._auth_check(sock=sock, pid=pid, uid=uid, gid=gid):
-                self.log.info('rejecting command connection to %s from ' \
+                self._log.info('rejecting command connection to %s from ' \
                         'PID %d (UID %d, GID %d)' % (self._socket_path, pid,
                                 uid, gid))
                 sock.close()

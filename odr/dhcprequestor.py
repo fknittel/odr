@@ -52,6 +52,7 @@ class DhcpAddressRequest(object):
         Creates a new XID.  Each address request has such a unique (randomly
         chosen) identifier.
 
+        :ivar log: Instance of the logger for this class.
         :ivar requestor: Instance of the requestor, where the request is
                 tracked and where the listening socket is maintained.
         :ivar timeout_mgr: Instance of the timeout manager.
@@ -73,6 +74,7 @@ class DhcpAddressRequest(object):
         :ivar lease_time: DHCP lease time we would like to have. Defaults to
                 None, meaning no specific lease time is requested.
         """
+        self._log = kwargs["log"]
         self._requestor = kwargs["requestor"]
         self._timeout_mgr = kwargs["timeout_mgr"]
         self._success_handler = kwargs["success_handler_clb"]
@@ -102,7 +104,7 @@ class DhcpAddressRequest(object):
         self._packet_retries = 0
 
     def __del__(self):
-        self.log.debug('xid %d destroyed' % self.xid)
+        self._log.debug('xid %d destroyed' % self.xid)
 
     @property
     def xid(self):
@@ -144,7 +146,7 @@ class DhcpAddressRequest(object):
         our future requests to only one server.
         """
         if len(self._server_ips) > 1:
-            self.log.debug("Attempting to find server ip")
+            self._log.debug("Attempting to find server ip")
             try:
                 self._server_ips = [ipv4(packet.GetOption(
                         'server_identifier'))]
@@ -153,7 +155,7 @@ class DhcpAddressRequest(object):
             else:
                 # We were able to determine a single DHCP server with which we
                 # will communicate from now on.
-                self.log.debug("Found server ip %s" % self._server_ips[0].str())
+                self._log.debug("Found server ip %s" % self._server_ips[0].str())
 
     def _send_packet(self, packet):
         """Method to initially send a packet.
@@ -175,12 +177,12 @@ class DhcpAddressRequest(object):
         for each DHCP server destination.
         """
         randomised_timeout = self._timeout + random.uniform(-1, 1)
-        self.log.debug('timeout for xid %d is %ds' % (self.xid,
+        self._log.debug('timeout for xid %d is %ds' % (self.xid,
             randomised_timeout))
         self._timeout_time = time.time() + randomised_timeout
         self._timeout_mgr.add_timeout_object(self)
         for server_ip in self._server_ips:
-            self.log.debug("Sending packet in state %d to %s [%d/%d]" % (
+            self._log.debug("Sending packet in state %d to %s [%d/%d]" % (
                     self._state, server_ip.str(), self._packet_retries + 1,
                     self._max_retries + 1))
             self._requestor.send_packet(packet, server_ip.str(), 67)
@@ -189,11 +191,11 @@ class DhcpAddressRequest(object):
         ip_address, port = packet.source_address
         ip_address = ipv4(ip_address)
         if port != 67:
-            self.log.debug("dropping packet from wrong port: %s:%d" % \
+            self._log.debug("dropping packet from wrong port: %s:%d" % \
                     packet.source_address)
             return False
         if ip_address not in self._server_ips:
-            self.log.debug("dropping packet from wrong IP address: %s:%d" % \
+            self._log.debug("dropping packet from wrong IP address: %s:%d" % \
                     packet.source_address)
             return False
         return True
@@ -207,7 +209,7 @@ class DhcpAddressRequest(object):
         """
         if self._state != self.AR_DISCOVER:
             return
-        self.log.debug("Received offer")
+        self._log.debug("Received offer")
         if not self._valid_source_address(offer_packet):
             return
         self._timeout_mgr.del_timeout_object(self)
@@ -228,7 +230,7 @@ class DhcpAddressRequest(object):
         """
         if self._state != self.AR_REQUEST:
             return
-        self.log.debug("Received ACK")
+        self._log.debug("Received ACK")
         if not self._valid_source_address(packet):
             return
         self._timeout_mgr.del_timeout_object(self)
@@ -302,7 +304,7 @@ class DhcpAddressRequest(object):
         """
         if self._state != self.AR_REQUEST:
             return
-        self.log.debug("Received NACK")
+        self._log.debug("Received NACK")
         if not self._valid_source_address(packet):
             return
         self._timeout_mgr.del_timeout_object(self)
@@ -326,14 +328,19 @@ class DhcpAddressRequest(object):
         handler is called.  Additionally, the request instance (self) is removed
         from the requestor and will therefore be destroyed soon.
         """
-        self.log.debug("handling timeout for %d" % self.xid)
+        self._log.debug("handling timeout for %d" % self.xid)
         if self._packet_retries >= self._max_retries:
             self._requestor.del_request(self)
-            self.log.debug("Timeout for reply to packet in state %d" % \
+            self._log.debug("Timeout for reply to packet in state %d" % \
                     self._state)
             self._failure_handler()
         elif self._last_packet is not None:
             self._resend_packet()
+
+    def _generate_request(self, offer_packet):
+        """Generates a DHCP REQUEST packet.
+        """
+        raise NotImplementedError('Method _generate_request not implemented')
 
 
 class DhcpAddressInitialRequest(DhcpAddressRequest):
@@ -345,10 +352,10 @@ class DhcpAddressInitialRequest(DhcpAddressRequest):
 
         See :meth:`DhcpAddressRequest.__init__` for further parameters.
         """
-        DhcpAddressRequest.__init__(self, **kwargs)
+        DhcpAddressRequest.__init__(self,
+                log=logging.getLogger('dhcpaddrinitreq'), **kwargs)
 
-        self.log = logging.getLogger('dhcpaddrinitreq')
-        self.log.debug('initial request with xid %d created' % self.xid)
+        self._log.debug('initial request with xid %d created' % self.xid)
         self._state = self.AR_DISCOVER
 
         self._requestor.add_request(self)
@@ -385,11 +392,11 @@ class DhcpAddressRefreshRequest(DhcpAddressRequest):
 
         See :meth:`DhcpAddressRequest.__init__` for further parameters.
         """
-        DhcpAddressRequest.__init__(self, **kwargs)
+        DhcpAddressRequest.__init__(self,
+                log=logging.getLogger('dhcpaddrrefreshreq'), **kwargs)
 
         self._client_ip = ipv4(kwargs["client_ip"])
-        self.log = logging.getLogger('dhcpaddrrefreshreq')
-        self.log.debug('refresh request with xid %d created' % self.xid)
+        self._log.debug('refresh request with xid %d created' % self.xid)
 
         self._state = self.AR_REQUEST
 
@@ -436,13 +443,13 @@ class DhcpAddressRequestor(ListeningSocket):
         :ivar listen_port: Local DHCP listening port. Defaults to 67.
         :ivar listen_device: Device name to bind to.
         """
-        self.log = logging.getLogger('dhcpaddrrequestor')
+        self._log = logging.getLogger('dhcpaddrrequestor')
         self._requests = {}
 
         super(DhcpAddressRequestor, self).__init__(listen_address,
                 listen_port, listen_device)
 
-        self.log.debug('listening on %s:%d@%s for DHCP responses' % (
+        self._log.debug('listening on %s:%d@%s for DHCP responses' % (
                 self.listen_address, self.listen_port, self.listen_device))
 
     def add_request(self, request):
@@ -450,7 +457,7 @@ class DhcpAddressRequestor(ListeningSocket):
 
         :ivar request: The request that should be added.
         """
-        self.log.debug("adding xid %d" % request.xid)
+        self._log.debug("adding xid %d" % request.xid)
         self._requests[request.xid] = request
 
     def del_request(self, request):
@@ -458,7 +465,7 @@ class DhcpAddressRequestor(ListeningSocket):
 
         :ivar request: The request that should be removed.
         """
-        self.log.debug("deleting xid %d" % request.xid)
+        self._log.debug("deleting xid %d" % request.xid)
         del self._requests[request.xid]
 
     def handle_socket(self):
@@ -468,7 +475,7 @@ class DhcpAddressRequestor(ListeningSocket):
         try:
             data, source_address = self._socket.recvfrom(2048)
             if len(data) == 0:
-                self.log.warning("unexpectedly received EOF!")
+                self._log.warning("unexpectedly received EOF!")
                 return
             packet = DhcpPacket()
             packet.source_address = source_address
@@ -476,30 +483,30 @@ class DhcpAddressRequestor(ListeningSocket):
 
             if (not packet.IsDhcpPacket()) or \
                     (not packet.IsOption("dhcp_message_type")):
-                self.log.debug("Ignoring invalid packet")
+                self._log.debug("Ignoring invalid packet")
                 return
 
             dhcp_type = packet.GetOption("dhcp_message_type")[0]
             if dhcp_type not in self._DHCP_TYPE_HANDLERS:
-                self.log.debug("Ignoring packet of unexpected DHCP type %d" % \
+                self._log.debug("Ignoring packet of unexpected DHCP type %d" % \
                         dhcp_type)
                 return
 
             xid = ipv4(packet.GetOption('xid'))
             if xid.int() not in self._requests:
-                self.log.debug("Ignoring answer with xid %s" % repr(xid.int()))
+                self._log.debug("Ignoring answer with xid %s" % repr(xid.int()))
                 return
 
             request = self._requests[xid.int()]
             clb_name = self._DHCP_TYPE_HANDLERS[dhcp_type]
             if not hasattr(request, clb_name):
-                self.log.error("request has no callback '%s'" % clb_name)
+                self._log.error("request has no callback '%s'" % clb_name)
                 return
 
             clb = getattr(request, clb_name)
             clb(packet)
         except:
-            self.log.exception('handling DHCP packet failed')
+            self._log.exception('handling DHCP packet failed')
 
     def send_packet(self, packet, dest_ip, dest_port):
         data = packet.EncodePacket()
@@ -512,7 +519,7 @@ class DhcpAddressRequestorManager(object):
     """
     def __init__(self):
         self._requestors_by_device_and_ip = {}
-        self.log = logging.getLogger('dhcpaddrrequestormgr')
+        self._log = logging.getLogger('dhcpaddrrequestormgr')
 
     def add_requestor(self, requestor):
         """
@@ -521,7 +528,7 @@ class DhcpAddressRequestorManager(object):
         """
         listen_pair = (requestor.listen_device, requestor.listen_address)
         if listen_pair in self._requestors_by_device_and_ip:
-            self.log.error('attempt to listen on IP %s@%s multiple times' % (
+            self._log.error('attempt to listen on IP %s@%s multiple times' % (
                     requestor.listen_address, requestor.listen_device))
             return
         self._requestors_by_device_and_ip[listen_pair] = requestor
@@ -538,8 +545,8 @@ class DhcpAddressRequestorManager(object):
         """
         listen_pair = (device, local_ip)
         if listen_pair not in self._requestors_by_device_and_ip:
-            self.log.error('request for unsupported local IP %s@%s' % (local_ip,
-                    device))
+            self._log.error('request for unsupported local IP %s@%s' % (
+                    local_ip, device))
             return None
         return self._requestors_by_device_and_ip[listen_pair]
 

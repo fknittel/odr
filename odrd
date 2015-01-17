@@ -55,7 +55,7 @@ class ParseUsername(object):
 
     def __init__(self, default_realm):
         self._default_realm = default_realm
-        self.log = logging.getLogger('parseusername')
+        self._log = logging.getLogger('parseusername')
 
     def parse_username(self, full_username):
         """Parse a full username into its components and apply any defaulting
@@ -67,17 +67,17 @@ class ParseUsername(object):
         """
         match = self.USERNAME_RE.match(full_username)
         if match is None:
-            self.log.warning('username in unexpected format: "%s"',
+            self._log.warning('username in unexpected format: "%s"',
                     full_username)
             return None
         realm = match.group('realm')
 
         if realm is None:
             if self._default_realm is None:
-                self.log.warning('username contains no realm: "%s"',
+                self._log.warning('username contains no realm: "%s"',
                         full_username)
                 return None
-            self.log.debug('no realm specified, using default realm "%s"',
+            self._log.debug('no realm specified, using default realm "%s"',
                     self._default_realm)
             realm = self._default_realm
 
@@ -104,7 +104,7 @@ class OvpnClient(object):
         self._rebinding_timeout = rebinding_timeout
         self._lease_timeout = lease_timeout
 
-        self.log = logging.getLogger('ovpnclient')
+        self._log = logging.getLogger('ovpnclient')
         self._killed = False
 
     def __str__(self):
@@ -119,7 +119,7 @@ class OvpnClient(object):
         is refreshed early enough.
         """
         if self._leased_ip_address is None or self._rebinding_timeout is None:
-            self.log.error('attempted to track lease for client "%s", but no ' \
+            self._log.error('attempted to track lease for client "%s", but no ' \
                     'lease available.', self)
             return
         self._timeout_mgr.add_timeout_object(self)
@@ -153,7 +153,7 @@ class OvpnClient(object):
 
         if self._lease_timeout is not None and \
                 self._lease_timeout <= time.time():
-            self.log.warning('Rebinding timeout for %s called too late - ' \
+            self._log.warning('Rebinding timeout for %s called too late - ' \
                     'lease has already expired on %d.  Disconnecting client.',
                     self, self._lease_timeout)
             self.server.disconnect_client(self.full_username)
@@ -171,7 +171,7 @@ class OvpnClient(object):
                     client_ip=self._leased_ip_address,
                     lease_time=self._realm_data.expected_dhcp_lease_time)
         except:
-            self.log.exception('Adding a new DHCP refresh request failed')
+            self._log.exception('Adding a new DHCP refresh request failed')
             self.server.disconnect_client(self.full_username)
 
     def _handle_lease_refresh_succeeded(self, res):
@@ -183,7 +183,7 @@ class OvpnClient(object):
         if self.iszombie:
             return
 
-        self.log.debug('DHCP refresh request succeeded: %s', repr(res))
+        self._log.debug('DHCP refresh request succeeded: %s', repr(res))
         self._leased_ip_address = res['ip_address']
         self._rebinding_timeout = res['rebinding_timeout']
         self._lease_timeout = res['lease_timeout']
@@ -230,7 +230,7 @@ class OvpnClientManager(object):
         self._refresh_lease = refresh_lease_clb
         self._sync_interval = sync_interval
 
-        self.log = logging.getLogger('ovpnclientmgr')
+        self._log = logging.getLogger('ovpnclientmgr')
         self._clients_by_username = {}
 
         self._clients_by_server = {}
@@ -255,11 +255,11 @@ class OvpnClientManager(object):
         """Add a client, based on a completed and successful DHCP request.
         """
         if client.full_username in self._clients_by_username:
-            self.log.info('replacing client connection in client list with ' \
+            self._log.info('replacing client connection in client list with ' \
                     'freshly connected client instance: %s' % client)
             self._del_client(self._clients_by_username[client.full_username])
         else:
-            self.log.debug('adding new client instance: %s', client)
+            self._log.debug('adding new client instance: %s', client)
 
         self._clients_by_username[client.full_username] = client
         self._clients_by_server[client.server][client.full_username] = client
@@ -292,14 +292,14 @@ class OvpnClientManager(object):
         sync_clients().
         """
         if client_data_list is None:
-            self.log.error('syncing the client list with server %s failed',
+            self._log.error('syncing the client list with server %s failed',
                     server)
             return
 
         client_data_by_username = {}
 
         for client_data in client_data_list:
-            self.log.debug('client_data: "%s" with "%s"',
+            self._log.debug('client_data: "%s" with "%s"',
                     client_data.common_name, client_data.virtual_address)
             if client_data.virtual_address is None:
                 # Connection hasn't been fully established yet.  Skip it.
@@ -311,7 +311,7 @@ class OvpnClientManager(object):
                 client = self._clients_by_username[client_data.common_name]
                 if client.server != server:
                     # The client has jumped servers.  Remove it from the list.
-                    self.log.debug('cleaning up: client %s has moved ' \
+                    self._log.debug('cleaning up: client %s has moved ' \
                             'to server "%s".', client, server)
                     self._del_client(client)
 
@@ -325,10 +325,10 @@ class OvpnClientManager(object):
             if client.full_username not in client_data_by_username:
                 # The client has been disconnected.
                 if not client.iszombie:
-                    self.log.debug('cleaning up: client %s was disconnected ' \
+                    self._log.debug('cleaning up: client %s was disconnected ' \
                             'in the mean-while.', client)
                 else:
-                    self.log.debug('cleaning up: removing zombie client %s',
+                    self._log.debug('cleaning up: removing zombie client %s',
                             client)
                 self._del_client(client)
 
@@ -346,21 +346,21 @@ class OvpnClientManager(object):
         """Called when a client was disconnected.
         """
         if server not in self._clients_by_server:
-            self.log.error('attempting to disconnect user from non-existant ' \
+            self._log.error('attempting to disconnect user from non-existant ' \
                     'server "%s" (user "%s")' % (server, full_username))
             return
         server_clients = self._clients_by_server[server]
 
         if full_username not in server_clients:
-            self.log.error('attempting to disconnect user: "%s"',
+            self._log.error('attempting to disconnect user: "%s"',
                     full_username)
             return
         client = server_clients[full_username]
 
         if not client.iszombie:
-            self.log.debug('removing zombie client %s', client)
+            self._log.debug('removing zombie client %s', client)
         else:
-            self.log.debug('disconnected %s', client)
+            self._log.debug('disconnected %s', client)
         self._del_client(client)
 
     def _create_detected_client(self, full_username, server, leased_ip_address):
@@ -371,16 +371,16 @@ class OvpnClientManager(object):
         @param full_username: The full username of the connected client.
         @param server: The server instance the client is connected to.
         """
-        self.log.debug('detected client "%s"', full_username)
+        self._log.debug('detected client "%s"', full_username)
         ret = self._parse_username(full_username)
         if ret is None:
-            self.log.warning('parsing username "%s" failed', full_username)
+            self._log.warning('parsing username "%s" failed', full_username)
             server.disconnect_client(full_username)
             return
         realm = ret['realm']
 
         if realm not in self._realms_data:
-            self.log.warning('unknown realm "%s" for user "%s"', realm,
+            self._log.warning('unknown realm "%s" for user "%s"', realm,
                     full_username)
             server.disconnect_client(full_username)
             return
@@ -421,7 +421,8 @@ class OvpnCmdConn(CommandConnection):
         @param remove_client_clb: Call-back for removing an existing OpenVPN
             client instance.
         """
-        CommandConnection.__init__(self, sloop=sloop, sock=sock)
+        CommandConnection.__init__(self, sloop=sloop, sock=sock,
+                log=logging.getLogger('ovpncmdconn'))
         self._realms_data = realms_data
         self._servers = servers
         self._add_request = add_request_clb
@@ -434,10 +435,9 @@ class OvpnCmdConn(CommandConnection):
         self._full_username = None
         self._server = None
         self._realm_data = None
-        self.log = logging.getLogger('ovpncmdconn')
 
     def __del__(self):
-        self.log.debug('destructing OvpnCmdConn')
+        self._log.debug('destructing OvpnCmdConn')
         if self._ret_f is not None:
             if not self._wrote_ret:
                 self._write_ret(ovpn.CC_RET_FAILED)
@@ -450,7 +450,7 @@ class OvpnCmdConn(CommandConnection):
         """Write a specific return value to the deferred return value file.
         @param val: A CC_RET_* value.
         """
-        self.log.debug('writing deferred return value %d', val)
+        self._log.debug('writing deferred return value %d', val)
         ovpn.write_deferred_ret_file(self._ret_f, val)
         self._wrote_ret = True
 
@@ -461,21 +461,21 @@ class OvpnCmdConn(CommandConnection):
 
         @param res: Dictionary containing all data returned by the DHCP request.
         """
-        self.log.debug('DHCP request succeeded: %s', repr(res))
+        self._log.debug('DHCP request succeeded: %s', repr(res))
 
         if 'ip_address' not in res or 'subnet_mask' not in res:
-            self.log.error('DHCP request failed to provide a valid IP '\
+            self._log.error('DHCP request failed to provide a valid IP '\
                     'address: %s' % (repr(res)))
             self._write_ret(ovpn.CC_RET_FAILED)
             return
 
         if 'rebinding_timeout' not in res or 'lease_timeout' not in res:
-            self.log.error('DHCP request without lease indication: %s' % (
+            self._log.error('DHCP request without lease indication: %s' % (
                     repr(res)))
             self._write_ret(ovpn.CC_RET_FAILED)
             return
 
-        self.log.debug('writing OpenVPN client configuration')
+        self._log.debug('writing OpenVPN client configuration')
         self._config_f.seek(0)
 
         self._config_f.write('ifconfig-push %s %s\n' % (res['ip_address'],
@@ -492,7 +492,7 @@ class OvpnCmdConn(CommandConnection):
             self._config_f.write('push "route-gateway %s"\n' % (
                 res['gateway']))
         else:
-            self.log.debug('DHCP request provided no gateway information: %s'\
+            self._log.debug('DHCP request provided no gateway information: %s'\
                     % (repr(res)))
         if self._realm_data.provide_default_route and ('gateway' in res or \
                 self._realm_data.default_gateway is not None):
@@ -529,7 +529,7 @@ class OvpnCmdConn(CommandConnection):
         """Called as soon as the DHCP address request has failed or timed out.
         Takes care of notifying the OpenVPN server of the failure.
         """
-        self.log.debug('DHCP request failed')
+        self._log.debug('DHCP request failed')
         self._write_ret(ovpn.CC_RET_FAILED)
 
     def handle_cmd(self, cmd, params, files):
@@ -546,7 +546,7 @@ class OvpnCmdConn(CommandConnection):
             self._handle_disconnect_cmd(cmd, params, files)
         else:
             self.send_cmd('FAIL')
-            self.log.warning('received unknown command "%s"', cmd)
+            self._log.warning('received unknown command "%s"', cmd)
             return
 
     def _handle_request_cmd(self, cmd, params, files):
@@ -559,7 +559,7 @@ class OvpnCmdConn(CommandConnection):
             server_name = params['daemon_name']
         except KeyError, exc:
             self.send_cmd('FAIL')
-            self.log.warning('command "%s" is missing a parameter: %s', cmd,
+            self._log.warning('command "%s" is missing a parameter: %s', cmd,
                     exc.args)
             return
 
@@ -568,30 +568,30 @@ class OvpnCmdConn(CommandConnection):
             config_f = files[int(config_fidx)]
         except IndexError, exc:
             self.send_cmd('FAIL')
-            self.log.warning('file descriptor index out of range: %s', exc.args)
+            self._log.warning('file descriptor index out of range: %s', exc.args)
             return
         except ValueError, exc:
             self.send_cmd('FAIL')
-            self.log.warning('file descriptor index parsing failed: %s',
+            self._log.warning('file descriptor index parsing failed: %s',
                     exc.args)
             return
 
         ret = self._parse_username(self._full_username)
         if ret is None:
             self.send_cmd('FAIL')
-            self.log.warning('parsing username failed: "%s"',
+            self._log.warning('parsing username failed: "%s"',
                     self._full_username)
             return
         realm = ret['realm']
 
         if realm not in self._realms_data:
             self.send_cmd('FAIL')
-            self.log.error('unknown realm "%s"', realm)
+            self._log.error('unknown realm "%s"', realm)
             return
 
         if server_name not in self._servers:
             self.send_cmd('FAIL')
-            self.log.error('unknown server "%s"', server_name)
+            self._log.error('unknown server "%s"', server_name)
             return
 
         self._realm_data = self._realms_data[realm]
@@ -611,7 +611,7 @@ class OvpnCmdConn(CommandConnection):
                     server_ips=self._realm_data.dhcp_server_ips,
                     lease_time=self._realm_data.expected_dhcp_lease_time)
         except:
-            self.log.exception('Adding a new DHCP request failed')
+            self._log.exception('Adding a new DHCP request failed')
 
     def _handle_disconnect_cmd(self, cmd, params, files):
         """Handles the command for informing us of a client disconnect.
@@ -621,13 +621,13 @@ class OvpnCmdConn(CommandConnection):
             server_name = params['daemon_name']
         except KeyError, exc:
             self.send_cmd('FAIL')
-            self.log.warning('command "%s" is missing a parameter: %s', cmd,
+            self._log.warning('command "%s" is missing a parameter: %s', cmd,
                     exc.args)
             return
 
         if server_name not in self._servers:
             self.send_cmd('FAIL')
-            self.log.error('unknown server "%s"', server_name)
+            self._log.error('unknown server "%s"', server_name)
             return
         server = self._servers[server_name]
 
