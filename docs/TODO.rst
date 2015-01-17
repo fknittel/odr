@@ -42,3 +42,4 @@ Planned features / unsolved issues / wishlist items
   again. (Compare with RFC 2131, page 16, section 3.1, points 3 and 4.)
   (This is optional though, as servers must time-out such offers themselves.)
 
+* Port to Python 3
